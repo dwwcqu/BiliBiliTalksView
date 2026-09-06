@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from .contract import ContractError
 from .tail import select_tail_plan, validate_tail_evidence
+from .zero_reply import merge_history
+from .zero_schedule import complete_schedule, decide_policy
 
 
 def digest(value) -> str:
@@ -41,15 +43,19 @@ def start_tracking(metadata: dict, requested_mode: str = "full") -> None:
                          state.get("pagination_status") == "verified" else "needs_check")
 
 
-def prepare_refresh(records, metadata, progress, mode, observed, full_interval_hours):
+def prepare_refresh(records, metadata, progress, mode, observed, full_interval_hours, *,
+                    work_id=None, baseline_binding=None):
     """Freeze a new observation from trusted work evidence or conservatively imported files."""
     stamp = datetime.fromisoformat(observed)
     prior = metadata.get("_refresh", {})
     prior_full = prior.get("last_full_scan_completed_at")
     if datetime.fromisoformat(metadata["captured_to"]) > stamp:
         raise ContractError("baseline_from_future")
-    full = (mode == "full" or not prior_full or prior.get("full_scan_incomplete", True)
-            or stamp - datetime.fromisoformat(prior_full) >= timedelta(hours=full_interval_hours))
+    binding = baseline_binding or digest({"records": records, "metadata": metadata})
+    snapshot = decide_policy(mode, observed, full_interval_hours,
+        {**metadata, "_zero_schedule_rows": records}, work_id=work_id or str(uuid4()),
+        baseline_binding=binding)
+    full = snapshot["range_mode"] == "full"
     result = deepcopy(metadata)
     result.update(schema_version="1.0.0", export_id=str(uuid4()), captured_to=observed,
                   exported_at=observed,
@@ -61,12 +67,13 @@ def prepare_refresh(records, metadata, progress, mode, observed, full_interval_h
         "version": 1, "requested_mode": mode, "mode": "full" if full else "incremental",
         "started_at": observed, "last_full_scan_completed_at": prior_full,
         "full_scan_incomplete": full or prior.get("full_scan_incomplete", False),
-        "baseline_digest": digest({"records": records, "metadata": metadata}),
+        "baseline_digest": binding, "zero_policy_snapshot": snapshot,
         "baseline_fingerprints": {row["comment_id"]: fingerprints(row) for row in records},
         "observed_ids": [], "observed_main_ids": [],
     }
     states = {}
     old_rows = {row["comment_id"]: row for row in records}
+    stored_reply_roots = {row["root_id"] for row in records if row["kind"] == "reply"}
     for root in sorted({row["root_id"] for row in records} | set(metadata.get("_threads", {})), key=int):
         old = metadata.get("_threads", {}).get(root, {})
         check = old.get("reply_check_state")
@@ -75,6 +82,10 @@ def prepare_refresh(records, metadata, progress, mode, observed, full_interval_h
         states[root] = {key: deepcopy(old[key]) for key in (
             "checked_count", "checked_root", "last_complete_at", "last_reply_checked_at",
         ) if key in old}
+        states[root]["zero_reply_history"] = merge_history(
+            old.get("zero_reply_history"), is_new=False,
+            nonzero=root in stored_reply_roots,
+            unavailable=bool(old.get("unavailable") or old.get("prior_unavailable")))
         root_row = old_rows.get(root)
         evidence = validate_tail_evidence(old.get("tail_evidence"), root_row, old_rows,
                                           snapshot_at=metadata["captured_to"]) if root_row else None
@@ -87,7 +98,8 @@ def prepare_refresh(records, metadata, progress, mode, observed, full_interval_h
             states[root]["reply_check_state"] = "source_unavailable"
     result["_threads"] = states
     seeds = [dict(row, schema_version="1.0.0", export_id=result["export_id"]) for row in records]
-    return seeds, result, {"requests": 0, "finished": False, "blocked": False}
+    return seeds, result, {"requests": 0, "finished": False, "blocked": False,
+        "zero_policy_snapshot": snapshot, "zero_baseline_root_ids": sorted(states, key=int)}
 
 
 def track_rows(metadata, rows, phase):
@@ -102,7 +114,7 @@ def track_rows(metadata, rows, phase):
 
 def thread_done(state: dict) -> bool:
     """Output can remain partial even after this run finished checking the source."""
-    return bool(state.get("tail_completed") or state.get("skip_refresh") or state.get("unavailable")
+    return bool(state.get("zero_completed") or state.get("tail_completed") or state.get("skip_refresh") or state.get("unavailable")
                 or state.get("pagination_status") == "verified"
                 or (state.get("reply_check_state") == "complete"
                     and state.get("reply_verification") == "checked_now"))
@@ -167,7 +179,8 @@ def finish_tracking(metadata, records, progress):
     inherited_roots = {row["root_id"] for row in records
                        if row["kind"] == "reply" and row["comment_id"] not in observed}
     for root, state in metadata["_threads"].items():
-        if root in inherited_roots or state.get("skip_refresh") or state.get("tail_completed"):
+        if (root in inherited_roots or state.get("skip_refresh")
+                or state.get("tail_completed") or state.get("zero_completed")):
             state["pagination_status"] = "partial"
         if state.get("unavailable"):
             state.update(reply_check_state="source_unavailable", reply_verification="source_unavailable")
@@ -180,7 +193,14 @@ def finish_tracking(metadata, records, progress):
     metadata["coverage"]["reasons"] = sorted(reasons)
     if reasons:
         metadata["coverage"]["context_status"] = "gaps"
-    if info["mode"] == "full" and progress.get("finished") and progress.get("main_done"):
+    snapshot = info.get("zero_policy_snapshot")
+    schedule = complete_schedule(snapshot, metadata, records, progress) if snapshot else None
+    if schedule is not None:
+        info["zero_reply_schedule"] = schedule
+    if (info["mode"] == "full" and progress.get("finished") and progress.get("main_done")
+            and (snapshot is None or (schedule and schedule["full_details_completed"]))
+            and not any(state.get("zero_completed") or state.get("skip_refresh")
+                        or state.get("tail_completed") for state in metadata["_threads"].values())):
         info["last_full_scan_completed_at"] = metadata["captured_to"]
         info["full_scan_incomplete"] = False
     baseline = info["baseline_fingerprints"]

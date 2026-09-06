@@ -240,3 +240,30 @@ test('prefers request_timeout when response body reading exceeds ten seconds', {
     error instanceof ApiError && error.code === 'request_timeout'
   ))
 })
+
+
+test('zero-reply observation counts stay optional and state-scoped', async () => {
+  const legacy = await createApi(async () => json(fullVideo())).video(VIDEO_ID)
+  assert.equal(legacy.state.zero_reply_observed_threads, undefined)
+  const value = await createApi(async () => json(fullVideo({
+    state: fullSummary({ zero_reply_observed_threads: 0 }),
+    partial_state_id: UUID_A,
+    partial_state: fullSummary({ state_id: UUID_A, published: false,
+      zero_reply_observed_threads: 3,
+      coverage: { status: 'partial', context_status: 'gaps', reasons: ['replies_incomplete'] } }),
+  }))).video(VIDEO_ID)
+  assert.equal(value.state.zero_reply_observed_threads, 0)
+  assert.equal(value.partial_state.zero_reply_observed_threads, 3)
+})
+
+test('zero-reply observation count rejects malformed and inconsistent values', async () => {
+  for (const count of [true, -1, '2', 0.5, null, Number.MAX_SAFE_INTEGER + 1, 4]) {
+    const state = fullSummary({ zero_reply_observed_threads: count,
+      coverage: { status: 'partial', context_status: 'gaps', reasons: [] } })
+    await assert.rejects(createApi(async () => json(fullVideo({ state }))).video(VIDEO_ID),
+      error => error instanceof ApiError && error.code === 'invalid_response')
+  }
+  await assert.rejects(createApi(async () => json(fullVideo({
+    state: fullSummary({ zero_reply_observed_threads: 1 }),
+  }))).video(VIDEO_ID), error => error.code === 'invalid_response')
+})

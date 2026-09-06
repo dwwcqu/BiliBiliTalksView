@@ -2,6 +2,7 @@
 from .contract import ContractError
 from .diagnostics import is_reply_unavailable
 from .incremental import thread_done
+from .zero_reply import merge_history
 
 
 def annotate_unavailable(metadata, root, page, detail):
@@ -14,6 +15,8 @@ def annotate_unavailable(metadata, root, page, detail):
         raise ContractError("unavailable_target_stale")
     state["unavailable"] = {"http_status": 200, "api_code": detail.api_code,
                             "observed_at": detail.observed_at, "page": page}
+    state["zero_reply_history"] = merge_history(
+        state.get("zero_reply_history"), is_new=False, nonzero=False, unavailable=True)
     state["pagination_status"] = "partial"
     state["reply_check_state"] = "source_unavailable"
     state["reply_verification"] = "source_unavailable"

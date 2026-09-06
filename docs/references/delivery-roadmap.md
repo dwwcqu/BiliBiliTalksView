@@ -63,6 +63,8 @@
 
 尾部增量优化已按[实施计划](../plans/2026-09-06-tail-incremental-refresh-plan.md)完成：仅对具备可信分页证据且回复数增加的大楼使用重叠回读，异常回退；首次采集与主评论扫描不变。
 
+零回复详情请求优化已按[实施计划](../plans/2026-09-06-zero-reply-collection-plan.md)完成：普通auto可按严格条件省略详情，保留partial、单调历史反证和固定完整核对期限；显式新建full及到期任务继续核验。
+
 ## 分支与远端保存
 
 主分支固定为 `main`，远端固定为 `git@github.com:dwwcqu/BiliBiliTalksView.git`。开始每个独立功能前获取远端更新，从同步后的 `main` 创建 `feat/<topic>` 分支。该功能的需求、设计、计划、实现和测试均在同一个 `feat/` 分支完成，不为功能规划文档另建 `docs/` 分支；仅独立于功能的维护任务可使用 `fix/`、`docs/`。开始工作前明确告知分支名称。本次首次仓库初始化可直接提交到 `main`。

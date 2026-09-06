@@ -33,6 +33,14 @@ from .source import (
 )
 from .tail import build_tail_evidence, select_tail_plan
 from .tail_collection import run_tail
+from .zero_reply import (
+    build_zero_evidence,
+    can_omit,
+    merge_history,
+    merge_observations,
+    observe_zero,
+)
+from .zero_schedule import decide_policy, validate_policy_snapshot
 
 
 def now() -> str:
@@ -53,6 +61,32 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
     if existing and not resume:
         cp.close()
         raise ContractError("checkpoint_exists_use_resume")
+    had_snapshot = "zero_policy_snapshot" in progress
+    snapshot = validate_policy_snapshot(progress.get("zero_policy_snapshot"))
+    saved_snapshot = metadata.get("_refresh", {}).get("zero_policy_snapshot")
+    if (saved_snapshot is not None and validate_policy_snapshot(saved_snapshot) != snapshot
+            or snapshot is not None and progress.get("job_id") is not None
+            and snapshot["work_id"] != progress["job_id"]):
+        snapshot = None
+    if snapshot is None:
+        progress.pop("zero_policy_snapshot", None)
+        refresh_info = metadata.get("_refresh", {})
+        refresh_info.pop("zero_policy_snapshot", None)
+        refresh_info.pop("zero_reply_schedule", None)
+        for state in metadata.get("_threads", {}).values():
+            state.pop("zero_completed", None)
+            state.pop("zero_reply_evidence", None)
+        if existing:
+            progress["metadata"] = metadata
+    else:
+        progress["zero_policy_snapshot"] = snapshot
+    if not had_snapshot and "zero_policy_snapshot" not in progress and not resume:
+        # Original collect stays strict; refresh entry points freeze their own policy.
+        progress["zero_policy_snapshot"] = decide_policy(
+            "full", now(), 24, metadata if existing else None,
+            work_id=str(progress.get("job_id") or uuid4()), baseline_binding=None)
+    progress.setdefault("zero_baseline_root_ids", sorted(metadata.get("_threads", {}), key=int))
+    cp.set_progress(progress)
     recovery_pending = bool(progress.get("blocked"))
     if recovery_pending:
         if recovery_proof is None:
@@ -115,6 +149,8 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
                              "reasons": []}, "_threads": {}, "_unclassified": []}
             cp.initialize(metadata)
         start_tracking(metadata, requested_mode)
+        if "zero_policy_snapshot" in progress:
+            metadata["_refresh"]["zero_policy_snapshot"] = progress["zero_policy_snapshot"]
         context = getattr(client, "collection_context", None)
         if context is not None:
             metadata["hour_bucket"] = context["hour_bucket"]
@@ -163,6 +199,13 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
                         state = metadata["_threads"].setdefault(row["root_id"],
                             {"pagination_status": "not_started", "count": None,
                              "reply_check_state": "needs_check"})
+                        incoming = observe_zero(raw, source, now())
+                        state["zero_main_observation"] = merge_observations(
+                            state.get("zero_main_observation"), incoming)
+                        state["zero_reply_history"] = merge_history(
+                            state.get("zero_reply_history"),
+                            is_new=row["root_id"] not in progress["zero_baseline_root_ids"],
+                            nonzero=incoming["nonzero_observed"], unavailable=False)
                         state.update(main_count=raw.get("rcount"), main_core=_core(row))
                 new = {r["comment_id"] for r in rows} - seen
                 seen.update(r["comment_id"] for r in rows)
@@ -198,6 +241,21 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
         for root, state in metadata["_threads"].items():
             if thread_done(state):
                 continue
+            if (state.get("refresh_action") == "full" and state.get("main_observed")
+                    and can_omit(state.get("zero_main_observation"),
+                        state.get("zero_reply_history"),
+                        stored_replies=len(replies_by_root.get(root, {})),
+                        policy=progress.get("zero_policy_snapshot", {}).get("zero_policy", "verify"))):
+                evidence = build_zero_evidence(state["zero_main_observation"],
+                    state["zero_reply_history"], old_rows[root],
+                    progress["zero_policy_snapshot"]["work_id"])
+                if evidence is not None:
+                    state.update(zero_completed=True, zero_reply_evidence=evidence,
+                        refresh_action="zero", count=0, pagination_status="partial",
+                        reply_verification="not_checked")
+                    progress["metadata"] = metadata
+                    commit_page(f"zero:{root}", [])
+                    continue
             if state.get("refresh_action") == "tail":
                 plan = select_tail_plan(state, old_rows.get(root), old_rows,
                                         metadata["_refresh"]["mode"], state.get("main_count"))
@@ -240,6 +298,9 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
                 state["reply_verification"] = "checked_now"
                 state["last_reply_checked_at"] = now()
                 count = data["page"]["count"]
+                state["zero_reply_history"] = merge_history(
+                    state.get("zero_reply_history"), is_new=False,
+                    nonzero=count > 0 or bool(data.get("replies")), unavailable=False)
                 if "first_count" not in state:
                     state["first_count"] = count
                     main_count = state.get("main_count")
@@ -335,6 +396,8 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
             metadata["coverage"]["reasons"] = sorted(set(metadata["coverage"]["reasons"]) | {"unclassified_record"})
         progress["finished"] = True
         progress["blocked"] = False
+        progress["stopped_reason"] = None
+        progress["failure"] = None
     except Exception as exc:
         reason = (getattr(exc, "reason", str(exc))
                   if isinstance(exc, (CollectionStopped, ContractError, AccessControlError)) else "internal_error")

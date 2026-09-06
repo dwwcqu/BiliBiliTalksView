@@ -4,6 +4,7 @@ import math
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from app.storage.errors import StorageError
 from app.storage.frozen import freeze_batch
@@ -14,6 +15,7 @@ from .contract import ContractError
 from .incremental import prepare_refresh
 from .publication import exclusive_lock
 from .validation import read_json, read_lines, safe_path
+from .zero_schedule import decide_policy
 
 
 def _validate_arguments(max_requests, resume, baseline_work, baseline_batch, mode,
@@ -122,6 +124,9 @@ def refresh(url, work_dir, client, max_requests=12000, resume=False, *,
         try:
             checkpoint.set_progress({
                 "refresh_request": {"version": 1, "requested_mode": mode},
+                "zero_policy_snapshot": decide_policy(mode, collector.now(), full_interval_hours,
+                    None, work_id=str(uuid4()), baseline_binding=None),
+                "zero_baseline_root_ids": [],
                 "input_url": url, "max_requests": max_requests, "requests": 0,
             })
         finally:

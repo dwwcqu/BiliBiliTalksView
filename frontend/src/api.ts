@@ -29,6 +29,7 @@ export type Job = {
   input_url?: string
 }
 export type Summary = {
+  zero_reply_observed_threads?: number;
   state_id: string;
   title: string | null;
   published: boolean;
@@ -194,6 +195,10 @@ function summary(v: unknown, id: string): Summary{
   jsonValue(c)
   const x=obj(r.coverage);
   choice(x.status,['verified','partial'] as const);
+  if (r.zero_reply_observed_threads!==undefined) {
+    const zero=count(r.zero_reply_observed_threads);
+    if (zero>(c.root_comments as number)||(zero>0&&x.status!=='partial'))bad();
+  }
   choice(x.context_status,['gaps','no_known_gaps'] as const)
   if (!Array.isArray(x.reasons)||!x.reasons.every(y=>typeof y==='string'))bad()
   stamp(r.hour_bucket);

@@ -19,6 +19,7 @@ from .schema import discussion_states as states
 from .schema import import_receipts as receipts
 from .schema import videos
 from .tail_evidence import tail_for_state
+from .zero_evidence import check_zero_history_transition, filter_zero_extensions
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,11 @@ def prepare_handoff(frozen, records, metadata, job_id: str, baseline_version: in
             },
             "threads": compact_threads,
         }
+        zero_refresh, zero_threads, zero_summary = filter_zero_extensions(
+            metadata, list(original.values()), strict=True, work_id=job_id)
+        evidence['refresh'].update(zero_refresh)
+        for root, fields in zero_threads.items():
+            evidence['threads'][root].update(fields)
         envelope = {
             "version": 1,
             "job_id": job_id,
@@ -187,6 +193,8 @@ def prepare_handoff(frozen, records, metadata, job_id: str, baseline_version: in
             "batch_digest": frozen.digest,
             "evidence": evidence,
         }
+        if zero_summary is not None:
+            envelope['zero_reply_summary'] = zero_summary
         return Handoff(
             job_id,
             manifest["video_id"],
@@ -239,6 +247,9 @@ def materialize(conn, frozen, handoff: Handoff, commit_guard) -> dict:
                 raise StorageError("handoff_context_conflict")
             if prior is None and version != handoff.baseline_version:
                 raise StorageError("baseline_changed")
+            if video is not None:
+                check_zero_history_transition(conn,
+                    [video['current_state_id'], video['working_state_id']], envelope)
             result = _import_owned(conn, frozen, publish=True, atomic=True)
             existing = conn.execute(
                 select(states.c.refresh_context).where(states.c.state_id == result["state_id"])

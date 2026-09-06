@@ -46,7 +46,9 @@ def tail_case(frozen_case):
 def save(conn, rows, metadata, tmp_path, baseline_version=0):
     with freeze_batch(build_batch(rows, metadata, tmp_path / 'batch'),
                       tmp_path / 'frozen') as frozen:
-        handoff = prepare_handoff(frozen, rows, metadata, str(uuid4()), baseline_version)
+        work_id = metadata.get('_refresh', {}).get('zero_policy_snapshot', {}).get(
+            'work_id', str(uuid4()))
+        handoff = prepare_handoff(frozen, rows, metadata, work_id, baseline_version)
         result = materialize(conn, frozen, handoff, lambda *_: None)
     return result, handoff
 

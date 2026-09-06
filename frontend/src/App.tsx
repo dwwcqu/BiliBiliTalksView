@@ -61,6 +61,7 @@ function SavedSummary({ value, recent = false }: { value: Summary; recent?: bool
       <div><dt>小时标签（北京时间）</dt><dd>{time(value.hour_bucket)}</dd></div>
       <div><dt>实际采集区间（北京时间）</dt><dd>{time(value.captured_from)} — {time(value.captured_to)}</dd></div>
     </dl>
+    {(value.zero_reply_observed_threads ?? 0) > 0 && <p className="coverage-note">其中{count(value.zero_reply_observed_threads)}个楼仅依据主列表报告零回复，尚未访问详情核验。</p>}
     {value.coverage.context_status === 'gaps' && <p className="coverage-note">对话存在上下文缺口。</p>}
     {partial && <p className="coverage-note">这是部分保存结果，可能包含尚未重新核验的旧评论。</p>}
     {value.coverage.reasons.length > 0 && <ul className="reasons">{[...new Set(value.coverage.reasons.map(reason => reasonLabels[reason] ?? '存在其他完整性限制。'))].map(reason => <li key={reason}>{reason}</li>)}</ul>}

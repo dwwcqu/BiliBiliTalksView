@@ -13,6 +13,7 @@ from app.storage.codec import decode_json
 from app.storage.mapping import date_text, decoded_optional
 from app.storage.queries import list_thread_comments, list_user_comments, read_snapshot
 from app.storage.schema import comments, discussion_states, threads, videos
+from app.storage.zero_evidence import public_zero_count
 
 from .responses import APIError
 
@@ -58,7 +59,7 @@ def public_state(conn, state_id):
 
 def summary(row):
     manifest = decode_json(row["source_metadata"])["manifest"]
-    return {
+    result = {
         "state_id": str(row["state_id"]),
         "title": decoded_optional(row["title"]),
         "coverage": decode_json(row["coverage"]),
@@ -68,6 +69,16 @@ def summary(row):
         "captured_to": row["captured_to"],
         "published": row["lifecycle"] == "current",
     }
+    try:
+        context = decode_json(row.get('refresh_context'))
+    except (ValueError, TypeError):
+        context = None
+    zero_count = public_zero_count(context, row['video_id'],
+                                   result['counts'].get('root_comments'), result['coverage'],
+                                   row['captured_to'])
+    if zero_count is not None:
+        result['zero_reply_observed_threads'] = zero_count
+    return result
 
 
 def video_view(conn, video_id):

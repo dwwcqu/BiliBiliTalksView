@@ -16,6 +16,7 @@ from .queries import read_snapshot
 from .records import comment_select
 from .schema import comments, discussion_states, threads, unclassified_comments, videos
 from .tail_evidence import tail_for_state
+from .zero_evidence import filter_zero_extensions
 
 
 def freeze_baseline(conn, video_id: str, target: Path) -> dict:
@@ -90,6 +91,15 @@ def freeze_baseline(conn, video_id: str, target: Path) -> dict:
                 evidence.pop('tail_evidence', None)
                 if tail is not None:
                     evidence['tail_evidence'] = tail
+            zero_refresh, zero_threads, _ = filter_zero_extensions(metadata, rows)
+            if '_refresh' in metadata:
+                for key in ('zero_policy_snapshot', 'zero_reply_schedule'):
+                    metadata['_refresh'].pop(key, None)
+                metadata['_refresh'].update(zero_refresh)
+            for root, fields in zero_threads.items():
+                for key in ('zero_reply_history', 'zero_reply_evidence'):
+                    metadata['_threads'][root].pop(key, None)
+                metadata['_threads'][root].update(fields)
             metadata["_unclassified"] = [
                 decode_json(row)
                 for row in conn.execute(
