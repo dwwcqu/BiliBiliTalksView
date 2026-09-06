@@ -1,0 +1,334 @@
+"""Serial, resumable collection; frozen data is handed to the exporter."""
+import re
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+
+import httpx
+
+from .access_control import AccessControlError
+from .availability import annotate_unavailable
+from .checkpoint import Checkpoint
+from .contract import ContractError
+from .diagnostics import FailureDetail, is_reply_unavailable
+from .incremental import (
+    checked_thread,
+    finish_tracking,
+    select_threads,
+    start_tracking,
+    thread_done,
+    track_rows,
+)
+from .normalization import external_id, normalize_comment
+from .recovery_gate import authorize
+from .request_budget import task_budget
+from .source import (
+    CollectionStopped,
+    fetch_main,
+    fetch_replies,
+    get_signing_keys,
+    resolve_video,
+)
+
+
+def now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _core(row: dict) -> dict:
+    return {key: row[key] for key in ("comment_id", "root_id", "parent_id", "author", "content")}
+
+
+def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 12000,
+            resume: bool = False, *, recovery_proof=None, requested_mode="full") -> tuple[list[dict], dict]:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    cp = Checkpoint(work_dir / "work.sqlite3")
+    records, metadata = cp.freeze()
+    progress = cp.get_progress()
+    existing = "video_id" in metadata
+    if existing and not resume:
+        cp.close()
+        raise ContractError("checkpoint_exists_use_resume")
+    recovery_pending = bool(progress.get("blocked"))
+    if recovery_pending:
+        if recovery_proof is None:
+            cp.close()
+            raise CollectionStopped("blocked_requires_revalidation")
+        try:
+            authorize(recovery_proof, work_dir, client, progress)
+        except CollectionStopped:
+            cp.close()
+            raise
+    if existing and progress.get("finished"):
+        cp.close()
+        return records, metadata
+    progress.setdefault("requests", 0)
+    progress.setdefault("max_requests", max_requests)
+    parsed = urlsplit(url)
+    if parsed.scheme == "https" and parsed.netloc == "www.bilibili.com":
+        progress["input_url"] = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    cp.set_progress(progress)
+    budget_scope = task_budget(cp, client, max_requests)
+    budget_scope.__enter__()
+
+    def commit_page(key, rows):
+        nonlocal recovery_pending
+        guard = getattr(client, "collection_guard", None)
+        if guard is not None:
+            guard()
+        track_rows(metadata, rows, "main" if key.startswith("main:") else "replies")
+        if recovery_pending:
+            before_revision = cp.get_progress().get("checkpoint_revision", 0)
+            candidate = dict(progress)
+            candidate.update(blocked=False, stopped_reason=None, failure=None)
+            metadata["coverage"]["reasons"] = [r for r in metadata["coverage"].get("reasons", [])
+                                                if r != "access_restricted"]
+            candidate["metadata"] = metadata
+            cp.commit_page(key, rows, candidate)
+            saved = cp.get_progress()
+            if saved.get("checkpoint_revision", 0) != before_revision + 1:
+                raise CollectionStopped("recovery_page_not_committed")
+            progress.clear()
+            progress.update(saved)
+            recovery_pending = False
+        else:
+            cp.commit_page(key, rows, progress)
+
+    try:
+        resolved = resolve_video(url, client)
+        if existing and metadata["video_id"] != "bilibili:video:" + resolved["source"]["aid"]:
+            raise ContractError("checkpoint_video_mismatch")
+        if not existing:
+            observed = now()
+            metadata = {"schema_version": "1.0.0", "export_id": str(uuid4()),
+                "video_id": "bilibili:video:" + resolved["source"]["aid"], **resolved,
+                "input_url": url, "captured_from": observed, "captured_to": observed,
+                "exported_at": observed,
+                "hour_bucket": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%dT%H:00:00+08:00"),
+                "source_reported_count": None,
+                "coverage": {"status": "partial", "main_pagination": "not_started",
+                             "replies_pagination": "not_started", "context_status": "no_known_gaps",
+                             "reasons": []}, "_threads": {}, "_unclassified": []}
+            cp.initialize(metadata)
+        start_tracking(metadata, requested_mode)
+        context = getattr(client, "collection_context", None)
+        if context is not None:
+            metadata["hour_bucket"] = context["hour_bucket"]
+        progress["metadata"] = metadata
+        cp.set_progress(progress)
+        source = metadata["source"]
+
+        def normalize(raw, root=None):
+            try:
+                return normalize_comment(raw, root, metadata["video_id"], metadata["export_id"], now())
+            except ContractError as exc:
+                reason = str(exc)
+                if reason not in {"invalid_comment_id", "invalid_root_id"}:
+                    raise CollectionStopped("invalid_response") from exc
+                content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+                member = raw.get("member") if isinstance(raw.get("member"), dict) else {}
+                metadata["_unclassified"].append({"reason": reason, "observed_at": now(),
+                    "source_comment_id": str(raw["rpid"]) if type(raw.get("rpid")) in (str, int) else None,
+                    "source_root_id": str(raw["root"]) if type(raw.get("root")) in (str, int) else None,
+                    "author": {"uid": external_id(member.get("mid")),
+                               "nickname": member.get("uname") if isinstance(member.get("uname"), str) else None},
+                    "content": {"text": content.get("message") if isinstance(content.get("message"), str) else None,
+                                "images": [], "emotes": []}})
+                return None
+
+        if not progress.get("main_done"):
+            keys = get_signing_keys(client)
+            seen = set(metadata["_refresh"]["observed_main_ids"])
+            cursor = progress.get("cursor", "")
+            while True:
+                if cursor in progress.get("visited", []):
+                    raise CollectionStopped("cursor_cycle")
+                data = fetch_main(source, cursor, client, keys)
+                raw_rows = list(data["replies"] or [])
+                raw_rows += data.get("top_replies") or []
+                top = data.get("top") or {}
+                if isinstance(top, dict):
+                    raw_rows += [row for row in top.values() if isinstance(row, dict) and "rpid" in row]
+                rows = []
+                for raw in raw_rows:
+                    row = normalize(raw)
+                    if row:
+                        if row["kind"] != "root":
+                            raise CollectionStopped("invalid_main_root")
+                        rows.append(row)
+                        state = metadata["_threads"].setdefault(row["root_id"],
+                            {"pagination_status": "not_started", "count": None,
+                             "reply_check_state": "needs_check"})
+                        state.update(main_count=raw.get("rcount"), main_core=_core(row))
+                new = {r["comment_id"] for r in rows} - seen
+                seen.update(r["comment_id"] for r in rows)
+                end = data["cursor"]["is_end"]
+                if not rows and not end:
+                    raise CollectionStopped("unexpected_empty_main")
+                progress["old_pages"] = 0 if new else progress.get("old_pages", 0) + 1
+                if progress["old_pages"] >= 5 and not end:
+                    raise CollectionStopped("repeated_main_pages")
+                progress.setdefault("visited", []).append(cursor)
+                progress["cursor"] = data["cursor"].get("pagination_reply", {}).get("next_offset", "")
+                progress["main_done"] = end
+                reported = data["cursor"].get("all_count")
+                metadata["source_reported_count"] = reported if type(reported) is int and reported >= 0 else None
+                metadata["coverage"]["main_pagination"] = "verified" if end else "partial"
+                # Metadata is recoverable from comments/progress if a crash precedes its write.
+                progress["metadata"] = metadata
+                commit_page("main:" + str(len(progress["visited"])), rows)
+                if end:
+                    break
+                cursor = progress["cursor"]
+        records, _ = cp.freeze()
+        for row in records:
+            metadata["_threads"].setdefault(row["root_id"], {"pagination_status": "not_started", "count": None})
+        select_threads(metadata)
+        progress["metadata"] = metadata
+        cp.set_progress(progress)
+        for root, state in metadata["_threads"].items():
+            if thread_done(state):
+                continue
+            page = state.get("page", 1)
+            pass_number = state.get("pass", 0)
+            seen_replies = set(state.get("seen", []))
+            while True:
+                if page > 1000:
+                    raise CollectionStopped("budget_exhausted")
+                try:
+                    data = fetch_replies(source, root, page, client)
+                except CollectionStopped as exc:
+                    if not is_reply_unavailable(exc.detail):
+                        raise
+                    annotate_unavailable(metadata, root, page, exc.detail)
+                    progress["metadata"] = metadata
+                    commit_page(f"unavailable:{root}:{pass_number}:{page}", [])
+                    break
+                state["reply_verification"] = "checked_now"
+                state["last_reply_checked_at"] = now()
+                count = data["page"]["count"]
+                if "first_count" not in state:
+                    state["first_count"] = count
+                    main_count = state.get("main_count")
+                    if type(main_count) is int and main_count != count:
+                        state["changed"] = True
+                if count != state["first_count"]:
+                    state["changed"] = True
+                rows = []
+                root_row = normalize(data["root"], root)
+                if root_row:
+                    rows.append(root_row)
+                    prior_core = state.get("observed_core", {}).get(root)
+                    if prior_core is None and not pass_number:
+                        prior_core = state.get("main_core")
+                    if prior_core is not None and prior_core != _core(root_row):
+                        state["changed"] = True
+                reply_rows = []
+                for raw in data["replies"] or []:
+                    row = normalize(raw, root)
+                    if row:
+                        if row["kind"] != "reply":
+                            raise CollectionStopped("invalid_reply")
+                        reply_rows.append(row)
+                ids = {r["comment_id"] for r in reply_rows}
+                if len(ids) != len(reply_rows) or (ids and not ids - seen_replies):
+                    raise CollectionStopped("repeated_reply_page")
+                seen_replies.update(ids)
+                if len(seen_replies) > count:
+                    raise CollectionStopped("reply_count_mismatch")
+                tail = page * data["page"]["size"] >= count
+                if not ids and not tail:
+                    raise CollectionStopped("unexpected_empty_replies")
+                rows += reply_rows
+                state.update(page=page + 1, count=count, seen=sorted(seen_replies),
+                             pagination_status="partial", **{"pass": pass_number})
+                observed_core = state.setdefault("observed_core", {})
+                observed_core.update({row["comment_id"]: _core(row) for row in rows})
+                restart = False
+                if tail:
+                    if len(seen_replies) != count:
+                        raise CollectionStopped("reply_count_mismatch")
+                    if pass_number:
+                        if state.get("changed") or observed_core != state.get("baseline"):
+                            raise CollectionStopped("count_changed")
+                    elif state.get("changed"):
+                        state.update(baseline=observed_core, observed_core={}, changed=False,
+                                     page=1, seen=[], first_count=count, **{"pass": 1})
+                        restart = True
+                    if not restart:
+                        state["pagination_status"] = "verified"
+                        if root_row:
+                            checked_thread(state, root_row, now())
+                        state.pop("baseline", None)
+                # Tail verification or a re-read transition shares the page transaction.
+                progress["metadata"] = metadata
+                commit_page(f"reply:{root}:{pass_number}:{page}", rows)
+                if restart:
+                    pass_number, page, seen_replies = 1, 1, set()
+                    continue
+                if tail:
+                    break
+                page += 1
+        if recovery_pending:
+            raise CollectionStopped("recovery_no_data_commit")
+        metadata["coverage"].update(status="verified", replies_pagination="verified", reasons=[])
+        if any(state.get("unavailable") for state in metadata["_threads"].values()):
+            metadata["coverage"].update(status="partial", replies_pagination="partial",
+                                        reasons=["replies_incomplete"], context_status="gaps")
+        if metadata["_unclassified"]:
+            metadata["coverage"]["status"] = "partial"
+            metadata["coverage"]["reasons"] = sorted(set(metadata["coverage"]["reasons"]) | {"unclassified_record"})
+        progress["finished"] = True
+        progress["blocked"] = False
+    except Exception as exc:
+        reason = (getattr(exc, "reason", str(exc))
+                  if isinstance(exc, (CollectionStopped, ContractError, AccessControlError)) else "internal_error")
+        if not isinstance(reason, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", reason):
+            reason = "internal_error"
+        # Discard uncommitted page state; request debits are already durable.
+        records, metadata = cp.freeze()
+        progress = cp.get_progress()
+        detail = getattr(exc, "detail", None)
+        control_stop = reason in {"cooldown_active", "source_busy", "clock_inconsistent", "budget_exhausted", "lease_lost", "job_cancelled", "worker_stopped"}
+        if not control_stop:
+            if detail is None:
+                attempt = progress.get("attempt") or {}
+                detail = FailureDetail(category="local_validation", safe_reason=reason,
+                    video_id=metadata.get("video_id"), target=attempt.get("target", {}))
+                if reason == "access_restricted":
+                    detail = replace(detail, category="access_restricted",
+                                     phase=attempt.get("phase", "local_validation"), endpoint=attempt.get("endpoint"))
+            detail = replace(detail, checkpoint_revision=progress.get("checkpoint_revision", 0))
+            progress["failure"] = detail.to_dict()
+        resumable = (reason in {"network_error", "budget_exhausted", "cooldown_active", "source_busy", "lease_lost", "job_cancelled", "worker_stopped"}
+                     or (detail is not None and detail.category in {"network_error", "source_unavailable"}))
+        progress["stopped_reason"] = reason
+        progress["blocked"] = bool(progress.get("blocked")) or not resumable
+        if "video_id" not in metadata:
+            cp.set_progress(progress)
+            raise
+        coverage = metadata["coverage"]
+        coverage["status"] = "partial"
+        reasons = set(coverage["reasons"])
+        reasons.add("main_incomplete" if not progress.get("main_done") else "replies_incomplete")
+        if reason in {"access_restricted", "budget_exhausted", "count_changed", "identity_conflict"}:
+            reasons.add(reason)
+        coverage["reasons"] = sorted(reasons)
+    finally:
+        budget_scope.__exit__(None, None, None)
+        cp.close()
+    cp = Checkpoint(work_dir / "work.sqlite3")
+    try:
+        if "video_id" in metadata:
+            metadata["captured_to"] = now()
+            metadata["exported_at"] = now()
+            current_rows, _ = cp.freeze()
+            finish_tracking(metadata, current_rows, progress)
+            progress["metadata"] = metadata
+        cp.set_progress(progress)
+        records, final_metadata = cp.freeze()
+    finally:
+        cp.close()
+    return records, final_metadata

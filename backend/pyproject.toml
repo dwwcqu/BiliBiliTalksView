@@ -7,7 +7,7 @@ name = "bilibili-talk-view"
 version = "0.1.0"
 description = "Backend foundation for Bilibili discussion analysis"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1,<2"]
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1,<2", "httpx>=0.28,<1", "jsonschema>=4.23,<5", "SQLAlchemy>=2,<3", "psycopg[binary]>=3,<4", "alembic>=1.16,<2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.11,<1"]
@@ -22,3 +22,6 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.setuptools.package-data]
+"app.comment_export" = ["schemas/*.json", "schemas/v2/*.json"]

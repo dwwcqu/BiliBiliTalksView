@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:current:2",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "export_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^bilibili:video:[1-9][0-9]*$"
+    },
+    "batch_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^batches/[0-9a-f-]+$",
+      "not": {
+        "pattern": "\\s"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "export_id",
+    "video_id",
+    "batch_path"
+  ]
+}

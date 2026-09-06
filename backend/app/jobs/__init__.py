@@ -1,0 +1,1 @@
+"""Persistent background collection queue."""

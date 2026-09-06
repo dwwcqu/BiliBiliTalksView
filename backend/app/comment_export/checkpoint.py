@@ -1,0 +1,171 @@
+"""Single-process, transactional recovery storage for one collection task."""
+
+import json
+import sqlite3
+from pathlib import Path
+
+from .contract import ContractError, parse_json
+
+
+class Checkpoint:
+    def __init__(self, path: Path):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(path)
+        with self._connection:
+            self._connection.execute(
+                'CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            self._connection.execute(
+                'CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY)')
+            self._connection.execute(
+                'CREATE TABLE IF NOT EXISTS comments '
+                '(comment_id TEXT PRIMARY KEY, value TEXT NOT NULL)')
+
+    def _read(self, key: str, default: dict) -> dict:
+        row = self._connection.execute('SELECT value FROM state WHERE key = ?',
+                                       (key,)).fetchone()
+        return parse_json(row[0]) if row else default
+
+    def _write(self, key: str, value: dict) -> None:
+        payload = json.dumps(value, ensure_ascii=True, allow_nan=False)
+        self._connection.execute(
+            'INSERT INTO state (key, value) VALUES (?, ?) '
+            'ON CONFLICT(key) DO UPDATE SET value = excluded.value', (key, payload))
+
+    def initialize(self, metadata: dict) -> None:
+        with self._connection:
+            existing = self._read('metadata', {})
+            if existing:
+                if existing.get('video_id') != metadata.get('video_id'):
+                    raise ContractError('video_identity_mismatch')
+                return
+            self._write('metadata', metadata)
+
+    def get_progress(self) -> dict:
+        return self._read('progress', {})
+
+    def _control_progress(self, progress: dict, *, advance: bool = False) -> dict:
+        current = self._read('progress', {})
+        saved = dict(progress)
+        saved['checkpoint_revision'] = current.get('checkpoint_revision', 0) + int(advance)
+        if 'requests' in current or 'requests' in saved:
+            saved['requests'] = max(current.get('requests', 0), saved.get('requests', 0))
+        if 'max_requests' in current:
+            saved['max_requests'] = min(current['max_requests'], saved.get('max_requests', current['max_requests']))
+        return saved
+
+    def set_progress(self, progress: dict) -> None:
+        with self._connection:
+            progress = self._control_progress(progress)
+            if 'metadata' in progress:
+                current = self._read('metadata', {})
+                if current and current.get('video_id') != progress['metadata'].get('video_id'):
+                    raise ContractError('video_identity_mismatch')
+                self._write('metadata', progress['metadata'])
+            self._write('progress', progress)
+
+    def save_metadata(self, metadata: dict) -> None:
+        with self._connection:
+            existing = self._read('metadata', {})
+            if existing and existing.get('video_id') != metadata.get('video_id'):
+                raise ContractError('video_identity_mismatch')
+            self._write('metadata', metadata)
+
+    def commit_page(self, key: str, comments: list[dict], progress: dict) -> None:
+        with self._connection:
+            if self._connection.execute('SELECT 1 FROM pages WHERE key = ?',
+                                        (key,)).fetchone():
+                return
+            self._connection.execute('INSERT INTO pages (key) VALUES (?)', (key,))
+            for comment in comments:
+                comment_id = comment.get('comment_id')
+                if not isinstance(comment_id, str) or not comment_id:
+                    raise ContractError('invalid_comment_id')
+                row = self._connection.execute(
+                    'SELECT value FROM comments WHERE comment_id = ?', (comment_id,)).fetchone()
+                if row:
+                    previous = parse_json(row[0])
+                    if (previous.get('root_id') != comment.get('root_id')
+                            or previous.get('author', {}).get('uid') !=
+                            comment.get('author', {}).get('uid')):
+                        raise ContractError('identity_conflict')
+                self._connection.execute(
+                    'INSERT INTO comments (comment_id, value) VALUES (?, ?) '
+                    'ON CONFLICT(comment_id) DO UPDATE SET value = excluded.value',
+                    (comment_id, json.dumps(comment, ensure_ascii=True, allow_nan=False)))
+            if 'metadata' in progress:
+                current = self._read('metadata', {})
+                if current and current.get('video_id') != progress['metadata'].get('video_id'):
+                    raise ContractError('video_identity_mismatch')
+                self._write('metadata', progress['metadata'])
+            saved = self._control_progress(progress, advance=True)
+            self._write('progress', saved)
+        progress.update(saved)
+
+    def freeze(self) -> tuple[list[dict], dict]:
+        # One read transaction binds metadata and all records to the same database snapshot.
+        self._connection.execute('BEGIN')
+        try:
+            metadata = self._read('metadata', {'coverage': {'status': 'partial'}})
+            records = [parse_json(row[0]) for row in self._connection.execute(
+                'SELECT value FROM comments ORDER BY rowid')]
+            self._connection.commit()
+            return records, metadata
+        except BaseException:
+            self._connection.rollback()
+            raise
+
+    def close(self) -> None:
+        self._connection.close()
+
+
+def read_control_snapshot(path: Path) -> dict:
+    path = Path(path)
+    database = path if path.name.endswith(".sqlite3") else path / "work.sqlite3"
+    if not database.is_file():
+        raise ContractError("task_not_found")
+    try:
+        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        raise ContractError("invalid_control_state") from exc
+    try:
+        connection.execute("BEGIN")
+        values = {key: parse_json(value) for key, value in connection.execute("SELECT key,value FROM state")}
+        return {"progress": values.get("progress", {}), "metadata": values.get("metadata", {}),
+                "comment_count": connection.execute("SELECT count(*) FROM comments").fetchone()[0]}
+    except sqlite3.Error as exc:
+        raise ContractError("invalid_control_state") from exc
+    finally:
+        connection.close()
+
+
+def read_checkpoint(path: Path) -> tuple[list[dict], dict, dict]:
+    """Read records and control state from one immutable SQLite snapshot."""
+    path = Path(path)
+    database = path if path.name.endswith(".sqlite3") else path / "work.sqlite3"
+    if not database.is_file():
+        raise ContractError("task_not_found")
+    try:
+        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    except (OSError, sqlite3.Error) as exc:
+        raise ContractError("invalid_checkpoint") from exc
+    try:
+        connection.execute("BEGIN")
+        values = {
+            key: parse_json(value)
+            for key, value in connection.execute("SELECT key, value FROM state")
+        }
+        records = [
+            parse_json(row[0])
+            for row in connection.execute("SELECT value FROM comments ORDER BY rowid")
+        ]
+        connection.commit()
+        return records, values.get("metadata", {}), values.get("progress", {})
+    except ContractError:
+        connection.rollback()
+        raise
+    except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+        connection.rollback()
+        raise ContractError("invalid_checkpoint") from exc
+    finally:
+        connection.close()

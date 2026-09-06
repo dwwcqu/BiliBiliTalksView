@@ -27,6 +27,6 @@ def lock(roots: list[str], filename: str) -> None:
     (ROOT / "backend" / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-runtime = ["fastapi", "uvicorn", "python-dotenv"]
+runtime = ["fastapi", "uvicorn", "python-dotenv", "httpx", "jsonschema", "sqlalchemy", "psycopg", "psycopg-binary", "alembic"]
 lock(runtime, "requirements.lock")
 lock(runtime + ["pytest", "httpx", "ruff", "packaging"], "requirements-dev.lock")

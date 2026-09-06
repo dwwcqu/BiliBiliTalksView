@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:comment:1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "export_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^bilibili:video:[1-9][0-9]*$"
+    },
+    "comment_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "root_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "parent_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "enum": [
+        "root",
+        "reply"
+      ]
+    },
+    "author": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "uid",
+        "nickname"
+      ]
+    },
+    "reply_relation": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "source",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "target_uid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "target_uid"
+      ]
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "width": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "height": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "url",
+              "width",
+              "height"
+            ]
+          }
+        },
+        "emotes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "token",
+              "url"
+            ]
+          }
+        }
+      },
+      "required": [
+        "text",
+        "images",
+        "emotes"
+      ]
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "like_count": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "export_id",
+    "video_id",
+    "comment_id",
+    "root_id",
+    "parent_id",
+    "kind",
+    "author",
+    "reply_relation",
+    "content",
+    "created_at",
+    "collected_at",
+    "like_count"
+  ]
+}

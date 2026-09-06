@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:unclassified:1",
+  "type": "object",
+  "properties": {
+    "reason": {
+      "enum": [
+        "invalid_comment_id",
+        "invalid_root_id"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "source_comment_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_root_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "author": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "uid",
+        "nickname"
+      ]
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "width": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "height": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "url",
+              "width",
+              "height"
+            ]
+          }
+        },
+        "emotes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "token",
+              "url"
+            ]
+          }
+        }
+      },
+      "required": [
+        "text",
+        "images",
+        "emotes"
+      ]
+    }
+  },
+  "required": [
+    "reason",
+    "observed_at",
+    "source_comment_id",
+    "source_root_id",
+    "author",
+    "content"
+  ]
+}

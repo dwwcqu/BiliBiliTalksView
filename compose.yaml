@@ -6,3 +6,7 @@ services:
       - "127.0.0.1:${WEB_PORT:-8080}:8000"
     environment:
       APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      RATE_LIMIT_SECRET: ${RATE_LIMIT_SECRET:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}

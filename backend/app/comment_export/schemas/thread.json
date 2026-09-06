@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:thread:1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "export_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^bilibili:video:[1-9][0-9]*$"
+    },
+    "root_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "root_author": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nickname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "uid",
+        "nickname"
+      ]
+    },
+    "source_title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "comment_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reply_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "participant_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unknown_author_comment_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "comments_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:).+$"
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "pagination_status": {
+          "enum": [
+            "verified",
+            "partial",
+            "not_started"
+          ]
+        },
+        "context_status": {
+          "enum": [
+            "no_known_gaps",
+            "gaps"
+          ]
+        },
+        "source_reported_reply_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing_parent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "unknown_parent_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "pagination_status",
+        "context_status",
+        "source_reported_reply_count",
+        "missing_parent_ids",
+        "unknown_parent_comment_ids",
+        "reasons"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "export_id",
+    "video_id",
+    "root_id",
+    "root_author",
+    "source_title",
+    "comment_count",
+    "reply_count",
+    "participant_count",
+    "unknown_author_comment_count",
+    "comments_path",
+    "coverage"
+  ]
+}

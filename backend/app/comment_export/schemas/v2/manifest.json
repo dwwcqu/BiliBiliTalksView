@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:manifest:2",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "export_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^bilibili:video:[1-9][0-9]*$"
+    },
+    "input_url": {
+      "type": "string"
+    },
+    "canonical_url": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "enum": [
+            "bilibili"
+          ]
+        },
+        "aid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "bvid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "episode_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment_type": {
+          "enum": [
+            1
+          ]
+        },
+        "oid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        }
+      },
+      "required": [
+        "platform",
+        "aid",
+        "bvid",
+        "episode_id",
+        "comment_type",
+        "oid"
+      ]
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "captured_from": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "captured_to": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "hour_bucket": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:00:00\\+08:00$"
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "verified",
+            "partial"
+          ]
+        },
+        "main_pagination": {
+          "enum": [
+            "verified",
+            "partial",
+            "not_started"
+          ]
+        },
+        "replies_pagination": {
+          "enum": [
+            "verified",
+            "partial",
+            "not_started"
+          ]
+        },
+        "context_status": {
+          "enum": [
+            "no_known_gaps",
+            "gaps"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "main_pagination",
+        "replies_pagination",
+        "context_status",
+        "reasons"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "root_comments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replies": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "comments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "known_users": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_author_comments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unclassified_records": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "root_comments",
+        "replies",
+        "comments",
+        "known_users",
+        "unknown_author_comments",
+        "unclassified_records"
+      ]
+    },
+    "source_reported_count": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "root_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^threads/[0-9]{3,}/thread\\.json$",
+            "not": {
+              "pattern": "\\s"
+            }
+          }
+        },
+        "required": [
+          "root_id",
+          "path"
+        ]
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^users/(uid_[1-9][0-9]*|unknown)/user\\.json$",
+            "not": {
+              "pattern": "\\s"
+            }
+          }
+        },
+        "required": [
+          "uid",
+          "path"
+        ]
+      }
+    },
+    "unclassified_path": {
+      "enum": [
+        "unclassified.jsonl",
+        null
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "export_id",
+    "video_id",
+    "input_url",
+    "canonical_url",
+    "source",
+    "title",
+    "captured_from",
+    "captured_to",
+    "exported_at",
+    "hour_bucket",
+    "coverage",
+    "counts",
+    "source_reported_count",
+    "threads",
+    "users",
+    "unclassified_path"
+  ]
+}

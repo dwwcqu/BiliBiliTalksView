@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:user:1",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+\\.\\d+$"
+    },
+    "export_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "video_id": {
+      "type": "string",
+      "pattern": "^bilibili:video:[1-9][0-9]*$"
+    },
+    "uid": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "display_nickname": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "identity_status": {
+      "enum": [
+        "known",
+        "unknown"
+      ]
+    },
+    "comment_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "thread_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]*$"
+      },
+      "uniqueItems": true
+    },
+    "comments_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:).+$"
+    },
+    "coverage_status": {
+      "enum": [
+        "verified",
+        "partial"
+      ]
+    },
+    "context_status": {
+      "enum": [
+        "no_known_gaps",
+        "gaps"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schema_version",
+    "export_id",
+    "video_id",
+    "uid",
+    "display_nickname",
+    "identity_status",
+    "comment_count",
+    "thread_ids",
+    "comments_path",
+    "coverage_status",
+    "context_status",
+    "reasons"
+  ]
+}
