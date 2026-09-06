@@ -18,6 +18,7 @@ from .locks import video_lock
 from .schema import discussion_states as states
 from .schema import import_receipts as receipts
 from .schema import videos
+from .tail_evidence import tail_for_state
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,9 @@ def prepare_handoff(frozen, records, metadata, job_id: str, baseline_version: in
                 if key in state
             }
             compact_threads[root].update(reply_check_state=check, reply_verification=verification)
+            tail = tail_for_state(state, original.get(root), original, metadata['captured_to'])
+            if tail is not None:
+                compact_threads[root]['tail_evidence'] = tail
         if (
             any(row["kind"] == "root" and cid not in observed for cid, row in original.items())
             and manifest["coverage"]["main_pagination"] == "verified"

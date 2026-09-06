@@ -15,6 +15,7 @@ from .mapping import record_from_row
 from .queries import read_snapshot
 from .records import comment_select
 from .schema import comments, discussion_states, threads, unclassified_comments, videos
+from .tail_evidence import tail_for_state
 
 
 def freeze_baseline(conn, video_id: str, target: Path) -> dict:
@@ -83,6 +84,12 @@ def freeze_baseline(conn, video_id: str, target: Path) -> dict:
                     comment_select().where(comments.c.state_id == sid)
                 ).mappings()
             ]
+            by_id = {row['comment_id']: row for row in rows}
+            for root, evidence in metadata['_threads'].items():
+                tail = tail_for_state(evidence, by_id.get(root), by_id, metadata['captured_to'])
+                evidence.pop('tail_evidence', None)
+                if tail is not None:
+                    evidence['tail_evidence'] = tail
             metadata["_unclassified"] = [
                 decode_json(row)
                 for row in conn.execute(

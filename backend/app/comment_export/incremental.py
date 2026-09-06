@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .contract import ContractError
+from .tail import select_tail_plan, validate_tail_evidence
 
 
 def digest(value) -> str:
@@ -65,6 +66,7 @@ def prepare_refresh(records, metadata, progress, mode, observed, full_interval_h
         "observed_ids": [], "observed_main_ids": [],
     }
     states = {}
+    old_rows = {row["comment_id"]: row for row in records}
     for root in sorted({row["root_id"] for row in records} | set(metadata.get("_threads", {})), key=int):
         old = metadata.get("_threads", {}).get(root, {})
         check = old.get("reply_check_state")
@@ -73,6 +75,11 @@ def prepare_refresh(records, metadata, progress, mode, observed, full_interval_h
         states[root] = {key: deepcopy(old[key]) for key in (
             "checked_count", "checked_root", "last_complete_at", "last_reply_checked_at",
         ) if key in old}
+        root_row = old_rows.get(root)
+        evidence = validate_tail_evidence(old.get("tail_evidence"), root_row, old_rows,
+                                          snapshot_at=metadata["captured_to"]) if root_row else None
+        if evidence is not None:
+            states[root]["tail_evidence"] = evidence
         states[root].update(reply_check_state=check, pagination_status="not_started",
                             count=old.get("count"), reply_verification="not_checked")
         if old.get("unavailable"):
@@ -95,13 +102,13 @@ def track_rows(metadata, rows, phase):
 
 def thread_done(state: dict) -> bool:
     """Output can remain partial even after this run finished checking the source."""
-    return bool(state.get("skip_refresh") or state.get("unavailable")
+    return bool(state.get("tail_completed") or state.get("skip_refresh") or state.get("unavailable")
                 or state.get("pagination_status") == "verified"
                 or (state.get("reply_check_state") == "complete"
                     and state.get("reply_verification") == "checked_now"))
 
 
-def select_threads(metadata):
+def select_threads(metadata, old_rows=None):
     info = metadata["_refresh"]
     seen = set(info["observed_main_ids"])
     for root, state in metadata["_threads"].items():
@@ -109,21 +116,36 @@ def select_threads(metadata):
             continue
         state["selected_refresh"] = True
         absent = root not in seen
+        state["main_observed"] = not absent
         complete = state.get("reply_check_state") == "complete"
+        latest_count = state.get("checked_count")
+        root_row = (old_rows or {}).get(root)
+        evidence = validate_tail_evidence(state.get("tail_evidence"), root_row, old_rows,
+            snapshot_at=metadata["captured_to"]) if root_row else None
+        if evidence is not None:
+            latest_count = evidence["source_count"]
+        else:
+            state.pop("tail_evidence", None)
         unchanged = (type(state.get("main_count")) is int and
-                     state.get("checked_count") == state["main_count"] and
+                     latest_count == state["main_count"] and
                      state.get("checked_root") == root_signature(state["main_core"])) if not absent else False
         skip = info["mode"] == "incremental" and (
             (complete and (absent or unchanged)) or (absent and state.get("prior_unavailable"))
         )
         if skip:
-            state.update(skip_refresh=True, pagination_status="partial",
+            state.update(skip_refresh=True, refresh_action="skip", pagination_status="partial",
                          reply_verification="reused_unverified")
             if state.get("prior_unavailable"):
                 state["unavailable"] = state["prior_unavailable"]
                 state["reply_verification"] = "source_unavailable"
         else:
-            state.update(reply_check_state="needs_check", reply_verification="not_checked")
+            plan = select_tail_plan(state, root_row, old_rows, info["mode"],
+                                    state.get("main_count")) if root_row else None
+            if plan is not None:
+                state["refresh_action"] = "tail"
+            else:
+                state.update(refresh_action="full", reply_check_state="needs_check",
+                             reply_verification="not_checked")
 
 
 def checked_thread(state, root_row, observed):
@@ -145,7 +167,7 @@ def finish_tracking(metadata, records, progress):
     inherited_roots = {row["root_id"] for row in records
                        if row["kind"] == "reply" and row["comment_id"] not in observed}
     for root, state in metadata["_threads"].items():
-        if root in inherited_roots or state.get("skip_refresh"):
+        if root in inherited_roots or state.get("skip_refresh") or state.get("tail_completed"):
             state["pagination_status"] = "partial"
         if state.get("unavailable"):
             state.update(reply_check_state="source_unavailable", reply_verification="source_unavailable")

@@ -31,6 +31,8 @@ from .source import (
     get_signing_keys,
     resolve_video,
 )
+from .tail import build_tail_evidence, select_tail_plan
+from .tail_collection import run_tail
 
 
 def now() -> str:
@@ -185,15 +187,44 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
         records, _ = cp.freeze()
         for row in records:
             metadata["_threads"].setdefault(row["root_id"], {"pagination_status": "not_started", "count": None})
-        select_threads(metadata)
+        old_rows = {row["comment_id"]: row for row in records}
+        replies_by_root = {}
+        for row in records:
+            if row["kind"] == "reply":
+                replies_by_root.setdefault(row["root_id"], {})[row["comment_id"]] = row
+        select_threads(metadata, old_rows)
         progress["metadata"] = metadata
         cp.set_progress(progress)
         for root, state in metadata["_threads"].items():
             if thread_done(state):
                 continue
+            if state.get("refresh_action") == "tail":
+                plan = select_tail_plan(state, old_rows.get(root), old_rows,
+                                        metadata["_refresh"]["mode"], state.get("main_count"))
+                if plan is not None:
+                    try:
+                        completed = run_tail(plan, source, old_rows[root], old_rows, cp,
+                                             client, progress, normalize=normalize,
+                                             fetch=fetch_replies, checked_at=now,
+                                             recovery=recovery_pending)
+                    except CollectionStopped as exc:
+                        if not is_reply_unavailable(exc.detail):
+                            raise
+                        annotate_unavailable(metadata, root, state["page"], exc.detail)
+                        progress["metadata"] = metadata
+                        commit_page(f"unavailable:tail:{root}", [])
+                        continue
+                    if completed:
+                        recovery_pending = False
+                        continue
+                else:
+                    state.update(refresh_action="full", reply_check_state="needs_check")
             page = state.get("page", 1)
             pass_number = state.get("pass", 0)
             seen_replies = set(state.get("seen", []))
+            floor_rows = replies_by_root.get(root, {}).copy()
+            # Older resumed checkpoints have no trustworthy source order.
+            ordered_replies = state.get("ordered_seen", [] if page == 1 else None)
             while True:
                 if page > 1000:
                     raise CollectionStopped("budget_exhausted")
@@ -232,10 +263,18 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
                         if row["kind"] != "reply":
                             raise CollectionStopped("invalid_reply")
                         reply_rows.append(row)
+                floor_rows.update({r["comment_id"]: r for r in reply_rows})
                 ids = {r["comment_id"] for r in reply_rows}
                 if len(ids) != len(reply_rows) or (ids and not ids - seen_replies):
                     raise CollectionStopped("repeated_reply_page")
                 seen_replies.update(ids)
+                if (data["page"]["size"] != 20 or data["page"]["num"] != page
+                        or len(reply_rows) != min(20, max(0, count - (page - 1) * 20))):
+                    ordered_replies = None
+                    state["ordered_seen"] = None
+                if ordered_replies is not None:
+                    ordered_replies.extend(row["comment_id"] for row in reply_rows)
+                    state["ordered_seen"] = ordered_replies
                 if len(seen_replies) > count:
                     raise CollectionStopped("reply_count_mismatch")
                 tail = page * data["page"]["size"] >= count
@@ -255,18 +294,32 @@ def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 
                             raise CollectionStopped("count_changed")
                     elif state.get("changed"):
                         state.update(baseline=observed_core, observed_core={}, changed=False,
-                                     page=1, seen=[], first_count=count, **{"pass": 1})
+                                     page=1, seen=[], ordered_seen=[], first_count=count, **{"pass": 1})
                         restart = True
                     if not restart:
                         state["pagination_status"] = "verified"
                         if root_row:
                             checked_thread(state, root_row, now())
+                            evidence = None
+                            # Small floors always use full reads; they need no tail anchors.
+                            if (count > 60 and ordered_replies is not None
+                                    and len(floor_rows) == count
+                                    and not metadata["_unclassified"]):
+                                evidence = build_tail_evidence(
+                                    [floor_rows[cid] for cid in ordered_replies], root_row,
+                                    count, state["last_complete_at"])
+                            state.pop("tail_evidence", None)
+                            if evidence is not None:
+                                state["tail_evidence"] = evidence
+                        state.pop("ordered_seen", None)
                         state.pop("baseline", None)
                 # Tail verification or a re-read transition shares the page transaction.
                 progress["metadata"] = metadata
                 commit_page(f"reply:{root}:{pass_number}:{page}", rows)
+                old_rows.update({row["comment_id"]: row for row in rows})
                 if restart:
                     pass_number, page, seen_replies = 1, 1, set()
+                    ordered_replies = []
                     continue
                 if tail:
                     break
