@@ -9,7 +9,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.comment_export.contract import parse_json
-from app.comment_export.validation import read_json, read_lines, safe_path, validate_batch
+from app.comment_export.dataset import ValidatedDataset
+from app.comment_export.validation import (
+    load_validated_documents,
+    read_json,
+    read_lines,
+    safe_path,
+)
 
 from .errors import StorageError
 
@@ -17,8 +23,31 @@ from .errors import StorageError
 @dataclass(frozen=True)
 class FrozenBatch:
     directory: Path
-    manifest: dict
-    digest: str
+    dataset: ValidatedDataset
+
+    @property
+    def manifest(self) -> dict:
+        return self.dataset.manifest
+
+    @property
+    def digest(self) -> str:
+        return self.dataset.digest
+
+    @property
+    def evidence(self):
+        return self.dataset.evidence
+
+    def read_document(self, path: str):
+        return self.dataset.read_document(path)
+
+    def read_lines(self, path: str) -> list[dict]:
+        return self.dataset.read_lines(path)
+
+    def iter_comments(self, root_id: str | None = None):
+        return self.dataset.iter_comments(root_id)
+
+    def iter_documents(self):
+        return self.dataset.iter_documents()
 
 
 def canonical_digest(directory: Path) -> str:
@@ -65,12 +94,26 @@ def freeze_batch(input_path: Path, work_root: Path):
                 if work_root.resolve().is_relative_to(source):
                     raise StorageError("unsafe_work_directory")
                 shutil.copytree(source, target, symlinks=True)
-                manifest = validate_batch(target)
+                documents = load_validated_documents(target)
+                manifest = documents["manifest.json"]
                 if pointer and any(
                     manifest[k] != pointer[k] for k in ("schema_version", "video_id", "export_id")
                 ):
                     raise StorageError("invalid_export")
-                frozen = FrozenBatch(target, manifest, canonical_digest(target))
+                # Legacy digest follows suffixes; validation follows declared roles.
+                # A single JSONL row with a non-jsonl suffix hashes as an object.
+                for relative, value in documents.items():
+                    if relative == "README.md":
+                        continue
+                    path = target / relative
+                    if path.suffix == ".jsonl" and not isinstance(value, list):
+                        read_lines(
+                            path, "unclassified" if relative == "unclassified.jsonl" else "comment"
+                        )
+                    elif path.suffix != ".jsonl" and isinstance(value, list):
+                        parse_json(path.read_text(encoding="utf-8"))
+                dataset = ValidatedDataset._from_validated_documents(documents)
+                frozen = FrozenBatch(target, dataset)
             except (OSError, ValueError) as exc:
                 if not pointer:
                     raise StorageError("invalid_export") from exc

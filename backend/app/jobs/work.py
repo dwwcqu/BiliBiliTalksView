@@ -9,12 +9,11 @@ from sqlalchemy import update
 
 from app.comment_export.checkpoint import Checkpoint, read_checkpoint
 from app.comment_export.collector import now
-from app.comment_export.export import build_batch
+from app.comment_export.export import build_dataset
 from app.comment_export.incremental import prepare_refresh
 from app.comment_export.zero_schedule import decide_policy
 from app.storage.baseline import freeze_baseline
-from app.storage.frozen import freeze_batch
-from app.storage.handoff import materialize, prepare_handoff
+from app.storage.handoff import materialize, prepare_dataset_handoff
 
 from .dispatch import complete_job
 from .errors import JobError
@@ -108,6 +107,9 @@ def prepare_job(owner, claim, root):
     try:
         progress = cp.get_progress()
         progress["requests"] = max(progress.get("requests", 0), current["requests"])
+        progress["max_requests"] = min(
+            progress.get("max_requests", current["max_requests"]), current["max_requests"]
+        )
         cp.set_progress(progress)
     finally:
         cp.close()
@@ -119,16 +121,13 @@ def save_result(owner, claim, collection, root, baseline_version):
     if metadata.get("video_id") != claim["video_id"]:
         raise JobError("video_identity_mismatch")
     exported = dict(metadata, schema_version="2.0.0", export_id=str(uuid4()), exported_at=now())
-    file_rows = [dict(row, schema_version="2.0.0", export_id=exported["export_id"]) for row in rows]
-    with TemporaryDirectory(prefix=".export-", dir=root) as temporary:
-        directory = Path(temporary)
-        batch = build_batch(file_rows, exported, directory / "batch")
-        with freeze_batch(batch, directory / "freeze") as frozen:
-            handoff = prepare_handoff(frozen, rows, metadata, claim["id"], baseline_version)
-            with owner.engine.connect() as conn:
-                return materialize(
-                    conn,
-                    frozen,
-                    handoff,
-                    lambda connection, result: complete_job(connection, owner, claim, result),
-                )
+    dataset_rows = [dict(row, schema_version="2.0.0", export_id=exported["export_id"]) for row in rows]
+    dataset = build_dataset(dataset_rows, exported)
+    handoff = prepare_dataset_handoff(dataset, claim["id"], baseline_version)
+    with owner.engine.connect() as conn:
+        return materialize(
+            conn,
+            dataset,
+            handoff,
+            lambda connection, result: complete_job(connection, owner, claim, result),
+        )

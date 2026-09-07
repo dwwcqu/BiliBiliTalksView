@@ -9,7 +9,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
-from app.comment_export.validation import read_json, read_lines, safe_path
+from app.comment_export.dataset import ValidatedDataset
 
 from .codec import decode_json, encode_json
 from .errors import StorageError
@@ -42,10 +42,11 @@ def _candidate(manifest: dict, state_id: str, user_metadata: list) -> dict:
     }
 
 
-def _load(conn, frozen: FrozenBatch, state_id: str, *, atomic: bool = False) -> None:
+def _load(conn, frozen: FrozenBatch | ValidatedDataset, state_id: str, *, atomic: bool = False) -> None:
+    manifest = frozen.manifest
     expected = {}
-    for entry in frozen.manifest["threads"]:
-        info = read_json(safe_path(frozen.directory, entry["path"]), "thread")
+    for entry in manifest["threads"]:
+        info = frozen.read_document(entry["path"])
         values = {
             "state_id": state_id,
             "root_id": info["root_id"],
@@ -64,22 +65,20 @@ def _load(conn, frozen: FrozenBatch, state_id: str, *, atomic: bool = False) -> 
             "coverage": encode_json(info["coverage"]),
             "source_metadata": encode_json(info),
         }
-        rows = read_lines(safe_path(frozen.directory, info["comments_path"]))
+        rows = frozen.read_lines(info["comments_path"])
         with (nullcontext() if atomic else conn.begin()):
             conn.execute(insert(threads).values(**values))
         for start in range(0, len(rows), 1000):
             part = rows[start : start + 1000]
             with (nullcontext() if atomic else conn.begin()):
-                payload_ids = resolve_payloads(conn, frozen.manifest["video_id"], part)
+                payload_ids = resolve_payloads(conn, manifest["video_id"], part)
                 conn.execute(insert(comments), [
                     member_values(r, state_id, payload_ids[r["comment_id"]]) for r in part
                 ])
             expected.update({r["comment_id"]: r for r in part})
     exceptions = []
-    if frozen.manifest["unclassified_path"]:
-        exceptions = read_lines(
-            safe_path(frozen.directory, frozen.manifest["unclassified_path"]), "unclassified"
-        )
+    if manifest["unclassified_path"]:
+        exceptions = frozen.read_lines(manifest["unclassified_path"])
         with (nullcontext() if atomic else conn.begin()):
             conn.execute(
                 insert(unclassified_comments),
@@ -96,7 +95,7 @@ def _load(conn, frozen: FrozenBatch, state_id: str, *, atomic: bool = False) -> 
                 comment_select().where(comments.c.state_id == state_id)
             ).mappings()
         }
-        if actual != expected or len(actual) != frozen.manifest["counts"]["comments"]:
+        if actual != expected or len(actual) != manifest["counts"]["comments"]:
             raise StorageError("import_verification_failed")
         actual_exceptions = [
             decode_json(value)
@@ -110,7 +109,7 @@ def _load(conn, frozen: FrozenBatch, state_id: str, *, atomic: bool = False) -> 
             raise StorageError("import_verification_failed")
 
 
-def _import_owned(conn, frozen: FrozenBatch, publish: bool = False, *, atomic=False) -> dict:
+def _import_owned(conn, frozen: FrozenBatch | ValidatedDataset, publish: bool = False, *, atomic=False) -> dict:
     if atomic and not conn.in_transaction():
         raise StorageError("atomic_transaction_required")
     manifest = frozen.manifest
@@ -189,7 +188,7 @@ def _import_owned(conn, frozen: FrozenBatch, publish: bool = False, *, atomic=Fa
         return publish_locked(conn, video_id, state_id, atomic=atomic) if publish else result
     state_id = str(uuid4())
     user_metadata = [
-        read_json(safe_path(frozen.directory, entry["path"]), "user")
+        frozen.read_document(entry["path"])
         for entry in manifest["users"]
     ]
     candidate = _candidate(manifest, state_id, user_metadata)
@@ -306,7 +305,7 @@ def _import_owned(conn, frozen: FrozenBatch, publish: bool = False, *, atomic=Fa
     }
 
 
-def import_batch(conn, frozen: FrozenBatch, publish: bool = False) -> dict:
+def import_batch(conn, frozen: FrozenBatch | ValidatedDataset, publish: bool = False) -> dict:
     """Legacy chunk-committing import; atomic worker imports use handoff.materialize."""
     with video_lock(conn, frozen.manifest["video_id"]):
         return _import_owned(conn, frozen, publish)

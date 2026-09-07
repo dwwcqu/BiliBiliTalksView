@@ -152,34 +152,19 @@ class TaskLease:
                 "lease_until": datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
             }
             if self.claim["kind"] == "job" and self.work_dir is not None:
-                from app.comment_export.checkpoint import read_control_snapshot
+                from app.comment_export.checkpoint import read_progress_summary
 
-                snapshot = read_control_snapshot(self.work_dir)
-                progress, metadata = snapshot["progress"], snapshot["metadata"]
-                threads = metadata.get("_threads", {})
-                phase = (
-                    "import"
-                    if progress.get("finished")
-                    else "replies"
-                    if progress.get("main_done")
-                    else "main"
-                )
-                values.update(
-                    phase=phase,
-                    progress={
-                        "phase": phase,
-                        "requests": progress.get("requests", 0),
-                        "comments": snapshot["comment_count"],
-                        "threads": len(threads),
-                        "verified_threads": sum(
-                            s.get("reply_check_state") == "complete" for s in threads.values()
-                        ),
-                        "unavailable_threads": sum(
-                            bool(s.get("unavailable")) for s in threads.values()
-                        ),
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    },
-                )
+                snapshot = read_progress_summary(self.work_dir)
+                summary = snapshot["summary"]
+                if summary is not None:
+                    values.update(
+                        phase=summary["phase"],
+                        progress={
+                            **summary,
+                            "requests": snapshot["request_control"].get("requests", 0),
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
             conn.execute(
                 update(table)
                 .where(id_column(self.claim["kind"]) == self.claim["id"])

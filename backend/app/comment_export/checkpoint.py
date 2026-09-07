@@ -2,8 +2,10 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
+from . import checkpoint_layout as layout
 from .contract import ContractError, parse_json
 
 
@@ -12,23 +14,37 @@ class Checkpoint:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path)
-        with self._connection:
-            self._connection.execute(
-                'CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-            self._connection.execute(
-                'CREATE TABLE IF NOT EXISTS pages (key TEXT PRIMARY KEY)')
-            self._connection.execute(
-                'CREATE TABLE IF NOT EXISTS comments '
-                '(comment_id TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        try:
+            self._connection.execute('BEGIN IMMEDIATE')
+            version = layout.detect_layout(self._connection)
+            if version == 1:
+                has_state = self._connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='state'"
+                ).fetchone()
+                if has_state:
+                    from .publication import lock_owned
+                    if not lock_owned(path.parent / '.collect.lock'):
+                        raise ContractError('checkpoint_migration_requires_lock')
+                layout.initialize_v2(self._connection)
+            else:
+                try:
+                    summary = self._read('progress_summary', None)
+                except ContractError:
+                    summary = None
+                if not layout.summary_valid(summary):
+                    layout.rebuild_summary(self._connection)
+            self._connection.commit()
+        except BaseException:
+            self._connection.rollback()
+            self._connection.close()
+            raise
 
-            self._connection.execute(
-                'CREATE TABLE IF NOT EXISTS tail_attempts '
-                '(root_id TEXT PRIMARY KEY, attempt INTEGER NOT NULL, '
-                'status TEXT NOT NULL, plan_json TEXT NOT NULL)')
-            self._connection.execute(
-                'CREATE TABLE IF NOT EXISTS tail_pages '
-                '(root_id TEXT, attempt INTEGER, page INTEGER, payload TEXT NOT NULL, '
-                'PRIMARY KEY(root_id, attempt, page))')
+    @contextmanager
+    def _transaction(self):
+        with self._connection:
+            self._connection.execute('BEGIN IMMEDIATE')
+            layout.detect_layout(self._connection)
+            yield
 
     def _read(self, key: str, default: dict) -> dict:
         row = self._connection.execute('SELECT value FROM state WHERE key = ?',
@@ -36,25 +52,51 @@ class Checkpoint:
         return parse_json(row[0]) if row else default
 
     def _write(self, key: str, value: dict) -> None:
+        if key == 'progress':
+            layout.store_progress(self._connection, value)
+            layout.rebuild_summary(self._connection)
+            return
         payload = json.dumps(value, ensure_ascii=True, allow_nan=False)
         self._connection.execute(
             'INSERT INTO state (key, value) VALUES (?, ?) '
             'ON CONFLICT(key) DO UPDATE SET value = excluded.value', (key, payload))
 
     def initialize(self, metadata: dict) -> None:
-        with self._connection:
+        with self._transaction():
             existing = self._read('metadata', {})
             if existing:
                 if existing.get('video_id') != metadata.get('video_id'):
                     raise ContractError('video_identity_mismatch')
                 return
             self._write('metadata', metadata)
+            layout.rebuild_summary(self._connection)
 
     def get_progress(self) -> dict:
-        return self._read('progress', {})
+        with self._connection:
+            self._connection.execute('BEGIN')
+            return layout.compose_progress(self._connection)
+
+    def read_request_control(self) -> dict:
+        layout.detect_layout(self._connection)
+        return layout.validate_control(self._read('request_control', None))
+
+    def reserve_request(self, attempt: dict, max_requests: int) -> dict:
+        with self._transaction():
+            control = self.read_request_control()
+            if type(max_requests) is not int or max_requests < 0:
+                raise ContractError('invalid_control_state')
+            budget = min(max_requests, control.get('max_requests', max_requests))
+            if control.get('requests', 0) >= budget:
+                raise ContractError('budget_exhausted')
+            attempt = dict(attempt)
+            attempt['checkpoint_revision'] = control.get('checkpoint_revision', 0)
+            control.update(requests=control.get('requests', 0) + 1,
+                           max_requests=budget, attempt=attempt)
+            self._write('request_control', control)
+        return control
 
     def _control_progress(self, progress: dict, *, advance: bool = False) -> dict:
-        current = self._read('progress', {})
+        current = self.read_request_control()
         saved = dict(progress)
         saved['checkpoint_revision'] = current.get('checkpoint_revision', 0) + int(advance)
         if 'requests' in current or 'requests' in saved:
@@ -64,7 +106,7 @@ class Checkpoint:
         return saved
 
     def set_progress(self, progress: dict) -> None:
-        with self._connection:
+        with self._transaction():
             progress = self._control_progress(progress)
             if 'metadata' in progress:
                 current = self._read('metadata', {})
@@ -74,21 +116,22 @@ class Checkpoint:
             self._write('progress', progress)
 
     def save_metadata(self, metadata: dict) -> None:
-        with self._connection:
+        with self._transaction():
             existing = self._read('metadata', {})
             if existing and existing.get('video_id') != metadata.get('video_id'):
                 raise ContractError('video_identity_mismatch')
             self._write('metadata', metadata)
+            layout.rebuild_summary(self._connection)
 
     def commit_page(self, key: str, comments: list[dict], progress: dict) -> None:
-        with self._connection:
+        with self._transaction():
             if self._connection.execute('SELECT 1 FROM pages WHERE key = ?',
                                         (key,)).fetchone():
                 return
             self._connection.execute('INSERT INTO pages (key) VALUES (?)', (key,))
             self._write_comments(comments)
             saved = self._publish_progress(progress)
-        progress.update(saved)
+        progress.update({key: value for key, value in saved.items() if key != 'metadata'})
 
     def _write_comments(self, comments: list[dict]) -> None:
         for comment in comments:
@@ -120,10 +163,13 @@ class Checkpoint:
 
     def _save_tail_control(self, progress: dict) -> dict:
         saved = self._control_progress(progress)
-        # Only confirmed metadata may be persisted, even inside recovery progress.
-        if 'metadata' in saved:
-            saved['metadata'] = self._read('metadata', {})
-        self._write('progress', saved)
+        layout.store_progress(self._connection, saved)
+        summary = self._read('progress_summary', None)
+        if layout.summary_valid(summary):
+            summary['phase'] = layout.phase(saved)
+            self._write('progress_summary', summary)
+        else:
+            layout.rebuild_summary(self._connection)
         return saved
 
     def _tail_status(self, root_id: str, attempt: int) -> str:
@@ -139,7 +185,7 @@ class Checkpoint:
             raise ContractError('invalid_tail_attempt')
 
     def begin_tail(self, root_id: str, plan: dict, progress: dict) -> int:
-        with self._connection:
+        with self._transaction():
             row = self._connection.execute(
                 'SELECT attempt FROM tail_attempts WHERE root_id = ?', (root_id,)).fetchone()
             attempt = row[0] + 1 if row else 1
@@ -155,7 +201,7 @@ class Checkpoint:
 
     def stage_tail_page(self, root_id: str, attempt: int, page: int,
                         payload: dict, progress: dict) -> None:
-        with self._connection:
+        with self._transaction():
             self._require_active_tail(root_id, attempt)
             encoded = json.dumps(payload, ensure_ascii=True, allow_nan=False, sort_keys=True)
             existing = self._connection.execute(
@@ -177,7 +223,7 @@ class Checkpoint:
             (root_id, attempt))]
 
     def promote_tail(self, root_id: str, attempt: int, rows: list[dict], progress: dict) -> None:
-        with self._connection:
+        with self._transaction():
             if self._tail_status(root_id, attempt) == 'promoted':
                 return
             self._require_active_tail(root_id, attempt)
@@ -186,7 +232,7 @@ class Checkpoint:
             self._connection.execute(
                 "UPDATE tail_attempts SET status = 'promoted' WHERE root_id = ? AND attempt = ?",
                 (root_id, attempt))
-        progress.update(saved)
+        progress.update({key: value for key, value in saved.items() if key != 'metadata'})
 
     def abandon_tail(self, root_id: str, attempt: int, progress: dict, *,
                      confirmed_progress: dict | None = None) -> None:
@@ -195,7 +241,7 @@ class Checkpoint:
         confirmed_progress must exclude unvalidated candidate observations. Metadata
         objects held by the caller stay alive; only non-metadata control is synced.
         """
-        with self._connection:
+        with self._transaction():
             self._require_active_tail(root_id, attempt)
             self._connection.execute(
                 "UPDATE tail_attempts SET status = 'abandoned' WHERE root_id = ? AND attempt = ?",
@@ -235,8 +281,8 @@ def read_control_snapshot(path: Path) -> dict:
         raise ContractError("invalid_control_state") from exc
     try:
         connection.execute("BEGIN")
-        values = {key: parse_json(value) for key, value in connection.execute("SELECT key,value FROM state")}
-        return {"progress": values.get("progress", {}), "metadata": values.get("metadata", {}),
+        metadata = layout.read(connection, "metadata", {})
+        return {"progress": layout.compose_progress(connection), "metadata": metadata,
                 "comment_count": connection.execute("SELECT count(*) FROM comments").fetchone()[0]}
     except sqlite3.Error as exc:
         raise ContractError("invalid_control_state") from exc
@@ -256,21 +302,64 @@ def read_checkpoint(path: Path) -> tuple[list[dict], dict, dict]:
         raise ContractError("invalid_checkpoint") from exc
     try:
         connection.execute("BEGIN")
-        values = {
-            key: parse_json(value)
-            for key, value in connection.execute("SELECT key, value FROM state")
-        }
+        metadata = layout.read(connection, "metadata", {})
         records = [
             parse_json(row[0])
             for row in connection.execute("SELECT value FROM comments ORDER BY rowid")
         ]
+        progress = layout.compose_progress(connection)
         connection.commit()
-        return records, values.get("metadata", {}), values.get("progress", {})
+        return records, metadata, progress
     except ContractError:
         connection.rollback()
         raise
     except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
         connection.rollback()
         raise ContractError("invalid_checkpoint") from exc
+    finally:
+        connection.close()
+
+
+def read_progress_summary(path: Path) -> dict:
+    path = Path(path)
+    database = path if path.name.endswith('.sqlite3') else path / 'work.sqlite3'
+    if not database.is_file():
+        raise ContractError('task_not_found')
+    try:
+        connection = sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)
+    except (OSError, sqlite3.Error) as exc:
+        raise ContractError('invalid_control_state') from exc
+    try:
+        connection.execute('BEGIN')
+        if layout.detect_layout(connection) == 1:
+            progress = layout.read(connection, 'progress', {})
+            if not isinstance(progress, dict):
+                raise ContractError('invalid_control_state')
+            control = {k: progress[k] for k in layout.CONTROL_KEYS if k in progress}
+            try:
+                metadata = layout.read(connection, 'metadata', {})
+                threads = metadata.get('_threads', {})
+                summary = {
+                    'comments': connection.execute('SELECT count(*) FROM comments').fetchone()[0],
+                    'threads': len(threads),
+                    'verified_threads': sum(s.get('reply_check_state') == 'complete'
+                                            for s in threads.values()),
+                    'unavailable_threads': sum(bool(s.get('unavailable'))
+                                               for s in threads.values()),
+                    'phase': layout.phase(progress),
+                }
+            except (ContractError, AttributeError, TypeError):
+                summary = None
+        else:
+            control = layout.read(connection, 'request_control', None)
+            try:
+                summary = layout.read(connection, 'progress_summary', None)
+            except ContractError:
+                summary = None
+            if not layout.summary_valid(summary):
+                summary = None
+        return {'request_control': layout.validate_control(control), 'summary': summary}
+    except sqlite3.Error as exc:
+        raise ContractError('invalid_control_state') from exc
     finally:
         connection.close()

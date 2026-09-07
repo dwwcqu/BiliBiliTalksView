@@ -2,8 +2,6 @@
 
 from sqlalchemy import select
 
-from app.comment_export.validation import read_json, read_lines, safe_path
-
 from .codec import decode_json
 from .mapping import record_from_row
 from .records import comment_select
@@ -35,14 +33,14 @@ def from_frozen(frozen):
     manifest = frozen.manifest
     thread_records, records = [], []
     for entry in manifest["threads"]:
-        info = read_json(safe_path(frozen.directory, entry["path"]), "thread")
+        info = frozen.read_document(entry["path"])
         thread_records.append(info)
-        records.extend(read_lines(safe_path(frozen.directory, info["comments_path"])))
+        records.extend(frozen.read_lines(info["comments_path"]))
     users = [
-        read_json(safe_path(frozen.directory, entry["path"]), "user") for entry in manifest["users"]
+        frozen.read_document(entry["path"]) for entry in manifest["users"]
     ]
     exceptions = (
-        read_lines(safe_path(frozen.directory, manifest["unclassified_path"]), "unclassified")
+        frozen.read_lines(manifest["unclassified_path"])
         if manifest["unclassified_path"]
         else []
     )

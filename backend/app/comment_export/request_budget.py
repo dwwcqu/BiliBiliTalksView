@@ -3,6 +3,7 @@
 import time
 from contextlib import contextmanager
 
+from .contract import ContractError
 from .diagnostics import ENDPOINT_PHASES, FailureDetail
 from .source import CollectionStopped, _request_target
 
@@ -19,7 +20,7 @@ def task_budget(cp, client, max_requests: int, *, call_limit: int | None = None)
             guard()
         if request.url.scheme != "https" or request.url.host != "api.bilibili.com":
             raise CollectionStopped("unsafe_request")
-        progress = cp.get_progress()
+        progress = cp.read_request_control()
         budget = min(max_requests, progress.get("max_requests", max_requests))
         if progress.get("requests", 0) >= budget:
             raise CollectionStopped("budget_exhausted")
@@ -31,7 +32,7 @@ def task_budget(cp, client, max_requests: int, *, call_limit: int | None = None)
         prior = getattr(client, "last_diagnostic", None)
         if isinstance(prior, FailureDetail) and prior.endpoint == request.url.path:
             target = prior.target
-        progress["attempt"] = FailureDetail(
+        attempt = FailureDetail(
             phase=ENDPOINT_PHASES.get(request.url.path, "local_validation"),
             endpoint=request.url.path,
             video_id=video_id,
@@ -39,9 +40,10 @@ def task_budget(cp, client, max_requests: int, *, call_limit: int | None = None)
             checkpoint_revision=progress.get("checkpoint_revision", 0),
             safe_reason="request_attempt",
         ).to_dict()
-        progress["requests"] = progress.get("requests", 0) + 1
-        progress["max_requests"] = budget
-        cp.set_progress(progress)
+        try:
+            cp.reserve_request(attempt, budget)
+        except ContractError as exc:
+            raise CollectionStopped(str(exc)) from exc
         used += 1
         last = time.monotonic()
 

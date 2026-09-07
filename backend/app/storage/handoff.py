@@ -9,7 +9,6 @@ from uuid import UUID
 from sqlalchemy import select, update
 
 from app.comment_export.incremental import root_signature
-from app.comment_export.validation import read_json, read_lines, safe_path
 
 from .codec import decode_json, encode_json
 from .errors import StorageError
@@ -42,6 +41,13 @@ def _stamp(value):
     return parsed
 
 
+def prepare_dataset_handoff(dataset, job_id: str, baseline_version: int) -> Handoff:
+    """Bind only the dataset's frozen collection evidence and comment snapshot."""
+    return prepare_handoff(
+        dataset, list(dataset.iter_comments()), dataset.evidence, job_id, baseline_version
+    )
+
+
 def prepare_handoff(frozen, records, metadata, job_id: str, baseline_version: int) -> Handoff:
     try:
         if str(UUID(job_id)) != job_id or type(baseline_version) is not int or baseline_version < 0:
@@ -57,14 +63,14 @@ def prepare_handoff(frozen, records, metadata, job_id: str, baseline_version: in
             raise ValueError
         actual, thread_files = {}, {}
         for entry in manifest["threads"]:
-            info = read_json(safe_path(frozen.directory, entry["path"]), "thread")
+            info = frozen.read_document(entry["path"])
             thread_files[info["root_id"]] = info
-            for row in read_lines(safe_path(frozen.directory, info["comments_path"])):
+            for row in frozen.read_lines(info["comments_path"]):
                 actual[row["comment_id"]] = _record(row)
         if original != actual or set(thread_files) != set(metadata["_threads"]):
             raise ValueError
         exceptions = (
-            read_lines(safe_path(frozen.directory, manifest["unclassified_path"]), "unclassified")
+            frozen.read_lines(manifest["unclassified_path"])
             if manifest["unclassified_path"]
             else []
         )

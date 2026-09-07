@@ -1,6 +1,7 @@
 """Freeze an immutable baseline before starting a refresh collection."""
 
 import math
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,7 +14,7 @@ from . import collector
 from .checkpoint import Checkpoint, read_checkpoint
 from .contract import ContractError
 from .incremental import prepare_refresh
-from .publication import exclusive_lock
+from .publication import exclusive_lock, lock_owned
 from .validation import read_json, read_lines, safe_path
 from .zero_schedule import decide_policy
 
@@ -91,6 +92,15 @@ def _collect_existing(url, work_dir, client, max_requests, requested_mode=None):
 def refresh(url, work_dir, client, max_requests=12000, resume=False, *,
             baseline_work=None, baseline_batch=None, mode="auto", full_interval_hours=24):
     """Collect a refresh after atomically freezing its baseline and control state."""
+    lock = Path(work_dir) / '.collect.lock'
+    with nullcontext() if lock_owned(lock) else exclusive_lock(lock):
+        return _refresh_locked(url, work_dir, client, max_requests, resume,
+                               baseline_work=baseline_work, baseline_batch=baseline_batch,
+                               mode=mode, full_interval_hours=full_interval_hours)
+
+
+def _refresh_locked(url, work_dir, client, max_requests, resume, *, baseline_work,
+                    baseline_batch, mode, full_interval_hours):
     _validate_arguments(max_requests, resume, baseline_work, baseline_batch, mode,
                         full_interval_hours)
     work_dir = Path(work_dir)

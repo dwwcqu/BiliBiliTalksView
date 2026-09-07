@@ -1,6 +1,7 @@
 """Atomic current pointer publication and bounded whole-batch reading."""
 import os
 import shutil
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,6 +9,13 @@ from pathlib import Path
 from .contract import ContractError
 from .export import write_json
 from .validation import read_json, read_lines, safe_path, validate_batch
+
+_ownership = threading.local()
+
+
+def lock_owned(path: Path) -> bool:
+    """Report only locks actually acquired by this process and current thread."""
+    return (os.getpid(), Path(path).resolve()) in getattr(_ownership, 'locks', set())
 
 
 @contextmanager
@@ -28,9 +36,15 @@ def exclusive_lock(path: Path):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             raise ContractError("busy") from exc
+        owned = getattr(_ownership, 'locks', None)
+        if owned is None:
+            owned = _ownership.locks = set()
+        identity = (os.getpid(), path.resolve())
+        owned.add(identity)
         try:
             yield
         finally:
+            owned.discard(identity)
             stream.seek(0)
             if os.name == "nt":
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)

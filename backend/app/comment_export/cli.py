@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import httpx
 
 from .access_control import AccessClient, AccessControl, AccessControlError
-from .checkpoint import Checkpoint
+from .checkpoint import read_checkpoint
 from .collector import collect, now
 from .contract import ContractError
 from .export import LATEST_SCHEMA_VERSION, build_batch
@@ -42,11 +42,12 @@ def _client() -> httpx.Client:
 
 
 def export_work(work_dir: Path, output: Path) -> tuple[Path, dict]:
-    cp = Checkpoint(work_dir / "work.sqlite3")
     try:
-        rows, metadata = cp.freeze()
-    finally:
-        cp.close()
+        rows, metadata, _progress = read_checkpoint(work_dir)
+    except ContractError as exc:
+        if str(exc) == 'task_not_found':
+            raise ContractError('no_collection') from exc
+        raise
     if "video_id" not in metadata:
         raise ContractError("no_collection")
     metadata = deepcopy(metadata)

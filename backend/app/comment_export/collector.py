@@ -1,5 +1,6 @@
 """Serial, resumable collection; frozen data is handed to the exporter."""
 import re
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from .incremental import (
     track_rows,
 )
 from .normalization import external_id, normalize_comment
+from .publication import exclusive_lock, lock_owned
 from .recovery_gate import authorize
 from .request_budget import task_budget
 from .source import (
@@ -53,6 +55,15 @@ def _core(row: dict) -> dict:
 
 def collect(url: str, work_dir: Path, client: httpx.Client, max_requests: int = 12000,
             resume: bool = False, *, recovery_proof=None, requested_mode="full") -> tuple[list[dict], dict]:
+    work_dir = Path(work_dir)
+    lock = work_dir / '.collect.lock'
+    with nullcontext() if lock_owned(lock) else exclusive_lock(lock):
+        return _collect_locked(url, work_dir, client, max_requests, resume,
+                               recovery_proof=recovery_proof, requested_mode=requested_mode)
+
+
+def _collect_locked(url, work_dir, client, max_requests, resume, *, recovery_proof,
+                    requested_mode):
     work_dir.mkdir(parents=True, exist_ok=True)
     cp = Checkpoint(work_dir / "work.sqlite3")
     records, metadata = cp.freeze()
