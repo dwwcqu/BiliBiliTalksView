@@ -1,0 +1,5 @@
+{
+  "analysis_rules": {"name": "analysis-standard.md", "version": "0.1"},
+  "role_prompt": {"name": "role.md", "version": "0.1"},
+  "coordination": {"name": "coordination.md", "version": "0.9"}
+}

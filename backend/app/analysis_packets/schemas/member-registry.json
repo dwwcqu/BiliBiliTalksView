@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:member-registry:2",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "BiliBiliTalksView.AnalysisInput"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "registry_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "video_id": {
+      "$ref": "urn:bilibili-talks-view:comment:2#/properties/video_id"
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "main": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "uncreated",
+            "available",
+            "running",
+            "unavailable"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "status"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "uncreated"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "session_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]+$"
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parent_session_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "role": {
+            "enum": [
+              "user_initial",
+              "thread_context",
+              "user_synthesis"
+            ]
+          },
+          "status": {
+            "enum": [
+              "available",
+              "running",
+              "completed",
+              "failed",
+              "unavailable"
+            ]
+          },
+          "active_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "minItems": 0
+          },
+          "role_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "member_id",
+          "agent_id",
+          "parent_session_id",
+          "role",
+          "status",
+          "active_task_id",
+          "task_ids",
+          "role_sha256"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "running"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "active_task_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "format": "uuid"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "active_task_id": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": false,
+      "minItems": 0
+    }
+  },
+  "required": [
+    "protocol",
+    "schema_version",
+    "registry_id",
+    "run_id",
+    "video_id",
+    "captured_at",
+    "main",
+    "members"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "main": {
+            "properties": {
+              "status": {
+                "const": "uncreated"
+              }
+            }
+          }
+        },
+        "required": [
+          "main"
+        ]
+      },
+      "then": {
+        "properties": {
+          "members": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

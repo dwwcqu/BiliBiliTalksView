@@ -1,0 +1,643 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-output:common:1",
+  "$defs": {
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "processed_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "unprocessed_targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "reason": {
+                "enum": [
+                  "context_unavailable",
+                  "capacity_exceeded",
+                  "dependency_unavailable",
+                  "unable_to_process"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "reason",
+              "detail"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false
+        }
+      },
+      "required": [
+        "processed_comment_ids",
+        "unprocessed_targets",
+        "limitations"
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "properties": {
+        "observation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:o[1-9][0-9]*$"
+        },
+        "origin_task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "origin_type": {
+          "enum": [
+            "user_initial",
+            "thread_context",
+            "user_synthesis"
+          ]
+        },
+        "uid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "dimension": {
+          "enum": [
+            "topic_stance",
+            "discourse_function",
+            "argument_support",
+            "response_engagement",
+            "expressed_emotion",
+            "interpersonal_expression",
+            "conflict_cooperation",
+            "view_revision"
+          ]
+        },
+        "subject": {
+          "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/subject"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false,
+          "minItems": 0
+        },
+        "assessment_status": {
+          "enum": [
+            "assessable",
+            "ambiguous",
+            "insufficient",
+            "not_applicable"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "source_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "quote"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "counter_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "quote"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false,
+          "minItems": 0
+        },
+        "export_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "rules_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "observation_id",
+        "origin_task_id",
+        "origin_type",
+        "uid",
+        "dimension",
+        "subject",
+        "labels",
+        "assessment_status",
+        "rationale",
+        "source_comment_ids",
+        "evidence",
+        "counter_evidence",
+        "limitations",
+        "export_id",
+        "rules_sha256"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "enum": [
+                  "topic_stance",
+                  "expressed_emotion",
+                  "view_revision"
+                ]
+              },
+              "subject": {
+                "properties": {
+                  "kind": {
+                    "const": "unknown"
+                  }
+                }
+              }
+            },
+            "required": [
+              "dimension",
+              "subject"
+            ]
+          },
+          "then": {
+            "properties": {
+              "assessment_status": {
+                "enum": [
+                  "ambiguous",
+                  "insufficient"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "assessment_status": {
+                "const": "assessable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "not": {
+        "required": [
+          "origin_result"
+        ]
+      }
+    },
+    "dimension_result": {
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "dimension": {
+          "enum": [
+            "topic_stance",
+            "discourse_function",
+            "argument_support",
+            "response_engagement",
+            "expressed_emotion",
+            "interpersonal_expression",
+            "conflict_cooperation",
+            "view_revision"
+          ]
+        },
+        "assessment_status": {
+          "enum": [
+            "assessable",
+            "ambiguous",
+            "insufficient",
+            "not_applicable"
+          ]
+        },
+        "observation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:o[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false
+        }
+      },
+      "required": [
+        "uid",
+        "dimension",
+        "assessment_status",
+        "observation_ids",
+        "limitations"
+      ]
+    },
+    "prior_disposition": {
+      "type": "object",
+      "properties": {
+        "prior_observation_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "origin_task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "decision": {
+          "enum": [
+            "confirmed",
+            "revised",
+            "rejected",
+            "unresolved"
+          ]
+        },
+        "replacement_observation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:o[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "quote"
+            ]
+          },
+          "uniqueItems": false
+        }
+      },
+      "required": [
+        "prior_observation_id",
+        "origin_task_id",
+        "decision",
+        "replacement_observation_ids",
+        "rationale",
+        "evidence"
+      ]
+    },
+    "profile_observation": {
+      "type": "object",
+      "properties": {
+        "observation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:o[1-9][0-9]*$"
+        },
+        "origin_task_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "origin_type": {
+          "enum": [
+            "user_initial",
+            "thread_context",
+            "user_synthesis"
+          ]
+        },
+        "uid": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "dimension": {
+          "enum": [
+            "topic_stance",
+            "discourse_function",
+            "argument_support",
+            "response_engagement",
+            "expressed_emotion",
+            "interpersonal_expression",
+            "conflict_cooperation",
+            "view_revision"
+          ]
+        },
+        "subject": {
+          "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/subject"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false,
+          "minItems": 0
+        },
+        "assessment_status": {
+          "enum": [
+            "assessable",
+            "ambiguous",
+            "insufficient",
+            "not_applicable"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "source_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "quote"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "counter_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "quote"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false,
+          "minItems": 0
+        },
+        "export_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "rules_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "origin_result": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "observation_id",
+        "origin_task_id",
+        "origin_type",
+        "uid",
+        "dimension",
+        "subject",
+        "labels",
+        "assessment_status",
+        "rationale",
+        "source_comment_ids",
+        "evidence",
+        "counter_evidence",
+        "limitations",
+        "export_id",
+        "rules_sha256",
+        "origin_result"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dimension": {
+                "enum": [
+                  "topic_stance",
+                  "expressed_emotion",
+                  "view_revision"
+                ]
+              },
+              "subject": {
+                "properties": {
+                  "kind": {
+                    "const": "unknown"
+                  }
+                }
+              }
+            },
+            "required": [
+              "dimension",
+              "subject"
+            ]
+          },
+          "then": {
+            "properties": {
+              "assessment_status": {
+                "enum": [
+                  "ambiguous",
+                  "insufficient"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "assessment_status": {
+                "const": "assessable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "profile_dimension": {
+      "type": "object",
+      "properties": {
+        "dimension": {
+          "enum": [
+            "topic_stance",
+            "discourse_function",
+            "argument_support",
+            "response_engagement",
+            "expressed_emotion",
+            "interpersonal_expression",
+            "conflict_cooperation",
+            "view_revision"
+          ]
+        },
+        "assessment_status": {
+          "enum": [
+            "assessable",
+            "ambiguous",
+            "insufficient",
+            "not_applicable"
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_observation"
+          },
+          "uniqueItems": false
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": false
+        }
+      },
+      "required": [
+        "dimension",
+        "assessment_status",
+        "observations",
+        "limitations"
+      ]
+    }
+  }
+}

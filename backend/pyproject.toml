@@ -25,3 +25,5 @@ line-length = 100
 
 [tool.setuptools.package-data]
 "app.comment_export" = ["schemas/*.json", "schemas/v2/*.json"]
+"app.analysis_packets" = ["schemas/*.json"]
+"app.analysis_results" = ["schemas/*.json"]

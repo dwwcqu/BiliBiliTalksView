@@ -2,6 +2,7 @@
 import re
 from collections.abc import Mapping
 from copy import deepcopy
+from decimal import Decimal
 from math import isfinite
 from pathlib import PurePosixPath
 
@@ -9,23 +10,27 @@ from .contract import ContractError, validate_record
 from .layout import nickname, order, user_directory, user_folder
 
 
-def _json_value(value: object) -> None:
+def _json_value(value: object, *, allow_decimal: bool = False) -> None:
     if value is None or type(value) in (str, bool, int):
         return
     if type(value) is float and isfinite(value):
         return
+    if allow_decimal and isinstance(value, Decimal) and value.is_finite():
+        return
     if isinstance(value, list):
         for item in value:
-            _json_value(item)
+            _json_value(item, allow_decimal=allow_decimal)
         return
     if isinstance(value, dict) and all(isinstance(key, str) for key in value):
         for item in value.values():
-            _json_value(item)
+            _json_value(item, allow_decimal=allow_decimal)
         return
     raise ContractError("invalid_json")
 
 
-def validate_documents(documents: Mapping[str, object]) -> dict:
+def validate_documents(
+    documents: Mapping[str, object], *, analysis_readme: bool = False,
+) -> dict:
     """Check original document values and return an independent manifest."""
     for path in documents:
         if (not isinstance(path, str) or not path or "\\" in path or ":" in path
@@ -44,7 +49,7 @@ def validate_documents(documents: Mapping[str, object]) -> dict:
 
     def document(path, kind):
         value = get(path)
-        _json_value(value)
+        _json_value(value, allow_decimal=analysis_readme)
         validate_record(kind, value)
         return value
 
@@ -53,7 +58,7 @@ def validate_documents(documents: Mapping[str, object]) -> dict:
         if not isinstance(values, list):
             raise ContractError("invalid_jsonl")
         for value in values:
-            _json_value(value)
+            _json_value(value, allow_decimal=analysis_readme)
             validate_record(kind, value)
         return values
 
@@ -64,7 +69,9 @@ def validate_documents(documents: Mapping[str, object]) -> dict:
             if (any(not re.fullmatch(r"[a-z0-9_-]+", part) for part in parts[:-1])
                     or not re.fullmatch(r"[A-Za-z0-9_.-]+", parts[-1])):
                 raise ContractError("nonportable_export_path")
-    if get("README.md") != "":
+    if analysis_readme and not isinstance(get("README.md"), str):
+        raise ContractError("invalid_readme")
+    if not analysis_readme and get("README.md") != "":
         raise ContractError("nonempty_readme")
     identity = {k: manifest[k] for k in ("schema_version", "video_id", "export_id")}
     projections = []

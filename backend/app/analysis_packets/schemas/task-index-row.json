@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:task-index-row:2",
+  "type": "object",
+  "properties": {
+    "task_type": {
+      "enum": [
+        "user_initial",
+        "thread_context",
+        "user_synthesis"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "primary",
+        "reconcile"
+      ]
+    },
+    "synthesis_level": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "target_uid": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "root_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]*$"
+      },
+      "uniqueItems": true,
+      "minItems": 0
+    },
+    "input_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+    },
+    "input_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "format": "uuid"
+      },
+      "uniqueItems": true,
+      "minItems": 0
+    }
+  },
+  "required": [
+    "task_type",
+    "phase",
+    "synthesis_level",
+    "task_id",
+    "target_uid",
+    "root_ids",
+    "input_path",
+    "input_sha256",
+    "depends_on"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "thread_context"
+          }
+        },
+        "required": [
+          "task_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "synthesis_level": {
+            "type": "null"
+          },
+          "target_uid": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "phase": {
+            "const": "primary"
+          },
+          "target_uid": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "user_synthesis"
+          }
+        },
+        "required": [
+          "task_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "synthesis_level": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthesis_level": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

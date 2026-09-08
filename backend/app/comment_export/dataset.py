@@ -22,7 +22,11 @@ def _freeze(value: object, records: dict[bytes, object]) -> object:
     if isinstance(value, dict):
         # Copies in the two projections may compare equal while having different
         # JSON numbers. Only identical canonical encodings share a record body.
-        key = _encode(value) if "comment_id" in value and "content" in value else None
+        try:
+            key = _encode(value) if "comment_id" in value and "content" in value else None
+        except TypeError:
+            # Analysis snapshots retain Decimal values; skip the legacy JSON cache.
+            key = None
         if key is not None and key in records:
             return records[key]
         frozen = MappingProxyType({k: _freeze(v, records) for k, v in value.items()})
@@ -88,7 +92,7 @@ class ValidatedDataset:
         return cls._from_validated_documents(snapshot, evidence=evidence)
 
     @classmethod
-    def _from_validated_documents(cls, documents, *, evidence=None):
+    def _from_validated_documents(cls, documents, *, evidence=None, digest: str | None = None):
         """Internal file adapter entry after the shared and physical checks."""
         evidence = deepcopy(evidence)
         _json_value(evidence)
@@ -96,7 +100,7 @@ class ValidatedDataset:
         records = {}
         object.__setattr__(instance, "_documents", _freeze(documents, records))
         object.__setattr__(instance, "_evidence", _freeze(evidence, records))
-        object.__setattr__(instance, "_digest", _digest(documents))
+        object.__setattr__(instance, "_digest", _digest(documents) if digest is None else digest)
         return instance
 
     @property

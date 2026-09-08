@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:packet:2",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "BiliBiliTalksView.AnalysisInput"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prepared_run_id": {
+      "type": "string",
+      "pattern": "^prep-[0-9a-f]{64}$"
+    },
+    "video_id": {
+      "$ref": "urn:bilibili-talks-view:comment:2#/properties/video_id"
+    },
+    "export_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "export_schema_version": {
+      "type": "string",
+      "pattern": "^[12]\\.\\d+\\.\\d+$"
+    },
+    "task_type": {
+      "enum": [
+        "user_initial",
+        "thread_context",
+        "user_synthesis"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "primary",
+        "reconcile"
+      ]
+    },
+    "synthesis_level": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "target_uid": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 0
+        },
+        "target_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "context_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 0
+        },
+        "target_index": {
+          "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/target_index"
+        }
+      },
+      "required": [
+        "target_uid",
+        "root_ids",
+        "target_comment_ids",
+        "context_comment_ids",
+        "target_index"
+      ]
+    },
+    "resources": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/resources"
+    },
+    "comments": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/comment"
+      },
+      "uniqueItems": false,
+      "minItems": 0
+    },
+    "prior_observations": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/observation"
+      },
+      "uniqueItems": false,
+      "minItems": 0
+    },
+    "coverage": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/coverage"
+    },
+    "chunk": {
+      "type": "object",
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "format": "uuid"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "estimator": {
+          "type": "string"
+        },
+        "estimated_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_token_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reserved_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "group_id",
+        "index",
+        "count",
+        "estimator",
+        "estimated_input_tokens",
+        "input_token_limit",
+        "reserved_output_tokens"
+      ]
+    },
+    "response_contract": {
+      "type": "object",
+      "properties": {
+        "schema_ref": {
+          "anyOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/file_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_dimensions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "topic_stance",
+              "discourse_function",
+              "argument_support",
+              "response_engagement",
+              "expressed_emotion",
+              "interpersonal_expression",
+              "conflict_cooperation",
+              "view_revision"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 8,
+          "maxItems": 8
+        },
+        "required_identity_fields": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "task_id",
+              "run_id",
+              "video_id",
+              "export_id",
+              "target_uid",
+              "synthesis_level",
+              "rules_sha256"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 7,
+          "maxItems": 7
+        },
+        "evidence_required": {
+          "const": true
+        },
+        "allow_unknown": {
+          "const": true
+        }
+      },
+      "required": [
+        "schema_ref",
+        "required_dimensions",
+        "required_identity_fields",
+        "evidence_required",
+        "allow_unknown"
+      ]
+    }
+  },
+  "required": [
+    "protocol",
+    "schema_version",
+    "run_id",
+    "prepared_run_id",
+    "video_id",
+    "export_id",
+    "export_schema_version",
+    "task_type",
+    "phase",
+    "synthesis_level",
+    "task_id",
+    "scope",
+    "resources",
+    "comments",
+    "prior_observations",
+    "coverage",
+    "chunk",
+    "response_contract"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "thread_context"
+          }
+        },
+        "required": [
+          "task_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "synthesis_level": {
+            "type": "null"
+          },
+          "scope": {
+            "properties": {
+              "target_uid": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "phase": {
+            "const": "primary"
+          },
+          "scope": {
+            "properties": {
+              "target_uid": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "user_synthesis"
+          }
+        },
+        "required": [
+          "task_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "synthesis_level": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "synthesis_level": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "user_initial"
+          }
+        },
+        "required": [
+          "task_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "prior_observations": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task_type": {
+            "const": "thread_context"
+          },
+          "phase": {
+            "const": "primary"
+          }
+        },
+        "required": [
+          "task_type",
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "prior_observations": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

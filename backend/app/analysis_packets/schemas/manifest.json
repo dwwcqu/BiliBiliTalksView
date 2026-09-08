@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:manifest:2",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "BiliBiliTalksView.AnalysisInput"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prepared_run_id": {
+      "type": "string",
+      "pattern": "^prep-[0-9a-f]{64}$"
+    },
+    "video_id": {
+      "$ref": "urn:bilibili-talks-view:comment:2#/properties/video_id"
+    },
+    "export_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "export_schema_version": {
+      "type": "string",
+      "pattern": "^[12]\\.\\d+\\.\\d+$"
+    },
+    "manifest_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "previous_manifest_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "input_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "resources": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/resources"
+    },
+    "coverage": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/coverage"
+    },
+    "task_index": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "task_count"
+      ]
+    },
+    "member_registry": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/file_ref"
+    },
+    "group_coverage": {
+      "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/file_ref"
+    },
+    "execution_limits": {
+      "type": "object",
+      "properties": {
+        "max_active_members": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reserved_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "accounting_method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "max_active_members",
+        "max_input_tokens",
+        "reserved_output_tokens",
+        "accounting_method"
+      ]
+    }
+  },
+  "required": [
+    "protocol",
+    "schema_version",
+    "run_id",
+    "prepared_run_id",
+    "video_id",
+    "export_id",
+    "export_schema_version",
+    "manifest_id",
+    "previous_manifest_sha256",
+    "input_fingerprint",
+    "resources",
+    "coverage",
+    "task_index",
+    "member_registry",
+    "group_coverage",
+    "execution_limits"
+  ]
+}

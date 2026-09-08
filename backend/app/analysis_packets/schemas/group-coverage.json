@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:group-coverage:2",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "BiliBiliTalksView.AnalysisInput"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "export_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task_type": {
+            "enum": [
+              "user_initial",
+              "thread_context",
+              "user_synthesis"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "primary",
+              "reconcile"
+            ]
+          },
+          "synthesis_level": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "target_uid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "root_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            "uniqueItems": true,
+            "minItems": 0
+          },
+          "target_index": {
+            "$ref": "urn:bilibili-talks-view:analysis-input:common:2#/$defs/target_index"
+          },
+          "published_tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "format": "uuid"
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "target_comment_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]*$"
+                  },
+                  "uniqueItems": true,
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "task_id",
+                "index",
+                "target_comment_ids"
+              ]
+            },
+            "uniqueItems": false,
+            "minItems": 0
+          },
+          "pending_targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "comment_id": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                },
+                "reason": {
+                  "enum": [
+                    "oversize_comment",
+                    "input_budget_exceeded",
+                    "dependency_missing"
+                  ]
+                },
+                "detail": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "comment_id",
+                "reason",
+                "detail"
+              ]
+            },
+            "uniqueItems": false,
+            "minItems": 0
+          },
+          "final_merge_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "task_type",
+          "phase",
+          "synthesis_level",
+          "group_id",
+          "target_uid",
+          "root_ids",
+          "target_index",
+          "published_tasks",
+          "pending_targets",
+          "final_merge_task_id"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "task_type": {
+                  "const": "thread_context"
+                }
+              },
+              "required": [
+                "task_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "synthesis_level": {
+                  "type": "null"
+                },
+                "target_uid": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "phase": {
+                  "const": "primary"
+                },
+                "target_uid": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "task_type": {
+                  "const": "user_synthesis"
+                }
+              },
+              "required": [
+                "task_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "synthesis_level": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "synthesis_level": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "task_type": {
+                  "not": {
+                    "const": "user_synthesis"
+                  }
+                }
+              },
+              "required": [
+                "task_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "final_merge_task_id": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": false,
+      "minItems": 0
+    }
+  },
+  "required": [
+    "protocol",
+    "schema_version",
+    "run_id",
+    "export_id",
+    "groups"
+  ]
+}

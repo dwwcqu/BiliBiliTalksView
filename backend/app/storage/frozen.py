@@ -3,6 +3,7 @@
 import hashlib
 import json
 import shutil
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,7 +75,12 @@ def canonical_digest(directory: Path) -> str:
 
 
 @contextmanager
-def freeze_batch(input_path: Path, work_root: Path):
+def freeze_batch(
+    input_path: Path, work_root: Path, *, analysis_readme: bool = False,
+    digest_function: Callable[[Path], str] = canonical_digest,
+):
+    if analysis_readme and (input_path.is_symlink() or input_path.is_junction()):
+        raise StorageError("invalid_export")
     input_path = input_path.resolve()
     work_root.mkdir(parents=True, exist_ok=True)
     is_pointer = input_path.name == "current.json" and not input_path.is_dir()
@@ -82,6 +88,8 @@ def freeze_batch(input_path: Path, work_root: Path):
     try:
         if is_pointer:
             pointer = read_json(input_path, "current")
+    except FileNotFoundError as exc:
+        raise StorageError("not_published" if analysis_readme else "invalid_export") from exc
     except (OSError, ValueError) as exc:
         raise StorageError("invalid_export") from exc
     for attempt in range(3):
@@ -93,8 +101,15 @@ def freeze_batch(input_path: Path, work_root: Path):
                 )
                 if work_root.resolve().is_relative_to(source):
                     raise StorageError("unsafe_work_directory")
+                if analysis_readme:
+                    for entry in (source, *source.parents):
+                        if entry.is_symlink() or entry.is_junction():
+                            raise StorageError("invalid_export")
+                    for entry in source.rglob("*"):
+                        if entry.is_symlink() or entry.is_junction():
+                            raise StorageError("invalid_export")
                 shutil.copytree(source, target, symlinks=True)
-                documents = load_validated_documents(target)
+                documents = load_validated_documents(target, analysis_readme=analysis_readme)
                 manifest = documents["manifest.json"]
                 if pointer and any(
                     manifest[k] != pointer[k] for k in ("schema_version", "video_id", "export_id")
@@ -112,15 +127,19 @@ def freeze_batch(input_path: Path, work_root: Path):
                         )
                     elif path.suffix != ".jsonl" and isinstance(value, list):
                         parse_json(path.read_text(encoding="utf-8"))
-                dataset = ValidatedDataset._from_validated_documents(documents)
+                digest = (digest_function(target)
+                          if analysis_readme or digest_function is not canonical_digest else None)
+                dataset = ValidatedDataset._from_validated_documents(documents, digest=digest)
                 frozen = FrozenBatch(target, dataset)
             except (OSError, ValueError) as exc:
                 if not pointer:
                     raise StorageError("invalid_export") from exc
                 try:
                     latest = read_json(input_path, "current")
-                except (OSError, ValueError) as missing:
+                except FileNotFoundError as missing:
                     raise StorageError("export_unavailable") from missing
+                except (OSError, ValueError) as invalid:
+                    raise StorageError("invalid_export") from invalid
                 if latest["export_id"] == pointer["export_id"]:
                     raise StorageError("invalid_export") from exc
                 if attempt == 2:

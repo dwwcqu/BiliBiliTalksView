@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-input:target-index-row:2",
+  "type": "object",
+  "properties": {
+    "comment_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "root_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "author_uid": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "comment_id",
+    "root_id",
+    "author_uid"
+  ]
+}

@@ -1,0 +1,518 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bilibili-talks-view:analysis-output:user-profile:1",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "BiliBiliTalksView.AnalysisOutput"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "artifact_type": {
+      "enum": [
+        "user_profile",
+        "profile_candidate"
+      ]
+    },
+    "video_id": {
+      "$ref": "urn:bilibili-talks-view:comment:2#/properties/video_id"
+    },
+    "uid": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "display_nickname": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "video_title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "prepared_run_id": {
+      "type": "string",
+      "pattern": "^prep-[0-9a-f]{64}$"
+    },
+    "export_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "format": "uuid"
+    },
+    "export_schema_version": {
+      "type": "string",
+      "pattern": "^[12]\\.\\d+\\.\\d+$"
+    },
+    "input_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "background": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "version"
+          ]
+        },
+        "analysis_rules": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "version"
+          ]
+        },
+        "role_prompt": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "version"
+          ]
+        },
+        "coordination": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "version"
+          ]
+        },
+        "execution_ref": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "background",
+        "analysis_rules",
+        "role_prompt",
+        "coordination",
+        "execution_ref"
+      ]
+    },
+    "source_coverage": {
+      "$ref": "urn:bilibili-talks-view:manifest:2#/properties/coverage"
+    },
+    "corpus_counts": {
+      "$ref": "urn:bilibili-talks-view:manifest:2#/properties/counts"
+    },
+    "analysis_coverage": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "partial"
+          ]
+        },
+        "target_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "processed_comment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "uniqueItems": true
+        },
+        "unprocessed_targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "comment_id": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "reason": {
+                "enum": [
+                  "context_unavailable",
+                  "capacity_exceeded",
+                  "dependency_unavailable",
+                  "unable_to_process"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "comment_id",
+              "reason",
+              "detail"
+            ]
+          },
+          "uniqueItems": false
+        },
+        "required_task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "uniqueItems": true
+        },
+        "accepted_task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "uniqueItems": true
+        },
+        "missing_task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "target_comment_ids",
+        "processed_comment_ids",
+        "unprocessed_targets",
+        "required_task_ids",
+        "accepted_task_ids",
+        "missing_task_ids"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "dimensions": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "topic_stance"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "discourse_function"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "argument_support"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "response_engagement"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "expressed_emotion"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "interpersonal_expression"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "conflict_cooperation"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "urn:bilibili-talks-view:analysis-output:common:1#/$defs/profile_dimension"
+            },
+            {
+              "properties": {
+                "dimension": {
+                  "const": "view_revision"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "minItems": 8,
+      "maxItems": 8
+    },
+    "source_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\:\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "task_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "task_id",
+          "attempt_id"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": false
+    }
+  },
+  "required": [
+    "protocol",
+    "schema_version",
+    "artifact_type",
+    "video_id",
+    "uid",
+    "display_nickname",
+    "video_title",
+    "run_id",
+    "prepared_run_id",
+    "export_id",
+    "export_schema_version",
+    "input_fingerprint",
+    "created_at",
+    "context",
+    "source_coverage",
+    "corpus_counts",
+    "analysis_coverage",
+    "summary",
+    "dimensions",
+    "source_results",
+    "limitations"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "user_profile"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "analysis_coverage": {
+            "properties": {
+              "status": {
+                "const": "complete"
+              },
+              "unprocessed_targets": {
+                "maxItems": 0
+              },
+              "missing_task_ids": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "analysis_coverage": {
+            "properties": {
+              "status": {
+                "const": "partial"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

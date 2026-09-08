@@ -347,3 +347,162 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/v1/video-requests
 Worker 将采集结果及核验证据冻结为同一只读数据集，通过共享校验后直接原子入库，不再生成、复制和读回临时导出目录。文件导入保留路径/符号链接安全检查，显式导出仍产生既有协议目录；下游调用和 `--output` 用法不变。同一固定批次保持原 canonical digest，任务终态、刷新上下文与状态发布仍在同一事务中提交。
 
 优化针对本地检查点和数据准备开销；Bilibili 请求等待、限速及可见性限制仍会影响总耗时。不会因提速将不可获取的评论标记为完整。
+## 分析输入准备（不调用模型）
+
+在独立环境安装当前 backend 后，可将 CommentExport 1.x／2.x 的发布容器固定为分析输入：
+
+```powershell
+.\.venv\Scripts\python.exe -m app.analysis_input.cli prepare --export-container "D:\Data\bilibili-video-<aid>" --analysis-root "data/analysis" --context "analysis-standard.md=docs/plans/2026-09-05-discussion-analysis-standard.md" --context "coordination.md=config/prompts/video-agent-coordination.md"
+```
+
+`--export-container` 指向包含 `current.json` 的目录。分析阶段已有内容的 README 会原样固定到本轮 `context/README.md`；源目录只读。数据和上下文全部校验、固定成功之前不会交给下游，本命令始终不启动 Agent、不连接数据库、不发出模型请求。
+
+输出为单个 JSON 对象，`status` 分别为 `ready`（输入准备完成）、`waiting_policy`（partial 等待明确策略）、`no_analyzable_users`（无已知 UID），均不等于画像已生成，且 `model_execution_authorized` 始终为 false。`--allow-partial` 只允许把部分输入准备为 ready，不授权模型调用。需要上下文文件时重复传入 `--context NAME=PATH`；名字不能与 README 或其他名字大小写冲突。
+
+保存位置：
+
+```text
+data/analysis/bilibili-video-<aid>/
+├── sessions/                         # 预留会话登记，准备阶段不创建 Agent
+├── inputs/<export_id>/               # 完整固定的导出副本
+└── runs/prep-<request-digest>/
+    ├── run.json                      # 不可变准备记录
+    ├── context/README.md             # 本轮视频背景
+    ├── context/<规则文件名>
+    ├── intermediate/                 # 预留，尚无模型产物
+    └── users/                        # 预留，后续保存 UID.json
+```
+
+同输入同上下文和策略重复调用返回同一个准备运行。README 或规则变化生成新运行，旧 context 保留；相同 export_id 的评论内容发生变化会报 input_conflict。已固定目录损坏会明确失败，不静默覆盖。准备去重不等于后续模型结果去重。
+
+退出码：0 表示准备流程返回有效状态（包括 waiting_policy）；2 为输入／协议／配置错误；3 为保存、锁或已存数据错误。调用方必须读取 JSON 的 status，不得仅凭退出码 0 启动分析。文件位于 Git 仓库中时，分析输出根必须被忽略；输出根与源容器不得相同或相互包含。失败时只输出稳定错误码，不打印评论或凭据。
+
+上游导出入口会切换并可能清理旧批次，程序按协议整批重读，最多重新开始两次；已完整读完的旧批次仍按其 export_id 保留。本模块尚未接入数据库采集任务自动触发或网页分析入口。
+
+## 离线大模型任务包（AnalysisInput 2.0.0）
+
+先用上面的输入准备命令将三份规则冻结到 context，其中额外加入：
+
+```powershell
+--context "role.md=config/prompts/discussion-analyst.md"
+```
+
+已有准备运行缺少 role.md 时重新准备，不直接修改旧 context。资源映射示例位于 config/analysis-packets-resources.json；映射的版本与文件内容应由调用方维护，SHA-256 以实际冻结文件为准。
+
+使用输入准备命令返回的 prepared ID 进行离线组装：
+
+```powershell
+.\.venv\Scripts\python.exe -m app.analysis_packets.cli assemble-primary --analysis-root data/analysis --video-id bilibili:video:<aid> --prepared-run-id prep-<digest> --resources-config config/analysis-packets-resources.json --max-input-tokens 160000 --reserved-output-tokens 4000 --context-window 200000 --max-active-members 2
+```
+
+这些数字只是离线容量配置示例，不表示任何实际模型的可用窗口。utf8-byte-estimate-v1 以 UTF-8 字节数作容量代理，包含序列化包和加载规则，不是已校准 tokenizer，也未包含未来会话历史及工具声明；模型执行前必须重新计量。
+
+组装产生新的 UUID 运行，不写入 prep-摘要目录。返回 `offline_prepared`、run_id、manifest_id、清单路径和摘要；`model_execution_authorized=false`。缺依赖／超大评论进入 group_coverage.pending_targets，不生成假任务或截断原文；目标与重复辅助上下文分开统计。
+
+```powershell
+.\.venv\Scripts\python.exe -m app.analysis_packets.cli validate --analysis-root data/analysis --run-id <run-uuid> --manifest-id <manifest-uuid>
+```
+
+验证按显式清单读取并核对固定来源、任务包、覆盖、资源摘要和前序清单链。首次 CLI 生成 user_initial/primary 与 thread_context/primary，规则、角色、背景都来自固定 context；默认省略昵称、点赞，不改变原文或媒体描述，不访问媒体 URL。
+
+库函数 advanced.build_reconcile 和 advanced.build_synthesis 支持后序纯组装，必须由受信调用方显式提供已接受的冻结结果目录。CLI 不提供将任意 JSON 自报成功转换成“已接受结果”的命令；后序发布／重新校验还会核对真实当前／历史任务依据和磁盘结果字节。没有该目录时不把后序结果当作已验证。
+
+本模块不调用 Claude、不连接数据库或采集队列，也不生成最终 users/<UID>.json。输出 schema_ref=null 仅适用于离线任务；生产模型输出 Schema、结果接受流程、实际 token/费用管理和 Agent 执行属于下一阶段。
+
+## 输出结果接受与用户画像保存
+
+`app.analysis_results` 提供本地服务接口，不提供让任意 JSON 自报“已接受”的公共 CLI，也不启动模型：
+
+- `bind_output_schema(assembly)`：为尚未发布的新任务绑定正式输出 Schema；Schema 文件独立保存，不混入四项角色／背景资源。已发布输入不可原地修改。
+- `accept_response(root, run_id, manifest_id, task_id, response_bytes, execution=..., rule_catalog=...)`：核对任务响应并写接受、拒绝或未完成回执。
+- `load_catalog(root, run_id, manifest_id, rule_catalog)`：从实际磁盘结果、接受回执、执行绑定和完整历史依赖重新构建 AcceptedCatalog。
+- `save_profile(root, run_id, manifest_id, uid, rule_catalog, execution_ref)`：只从已重新验证的任务结果生成文件，返回实际相对路径与覆盖状态。
+
+调用方必须是可信执行器。ExecutionContext 包含 attempt_id、input_sha256、authorized、delivery_verified、execution_ref、agent_id；不能从待验收模型返回的同名字段构造授权。实际发起调用、用户授权与完整输入交付由执行器确认，本库验证绑定关系，不替代认证服务或模型调用逻辑。
+
+执行器须冻结本运行的 `execution.json`，记录 run_id、rules_sha256、CLI版本、configured_model、reported_model（未知为null）、provider、session_id、agent_ids、输入／输出协议版本及limits。接受时将这些内容与清单中的成员登记、角色及任务归属绑定。角色标签目录由可信配置提供并与规则摘要绑定，不能让模型提供允许标签列表。
+
+每次尝试的执行绑定位于 `validation/<task_id>/<attempt_id>/execution-binding.json`，程序回执附加 `execution_binding_ref` 摘要引用。结果文件先写入、接受回执后提交；无接受回执的孤儿结果不能消费，重试可恢复相同内容，不覆盖冲突数据。
+
+最终文件路径为 `runs/<run_id>/users/<UID>.json`，包含八方向观察、对象、证据、批次、背景规则与执行来源。必需任务未齐全时仅写 `intermediate/profiles/<UID>/<candidate_id>.json`。源采集partial或context gaps原样保留，不因为分析覆盖complete而宣称源站全量。重复保存相同最终内容保留首次created_at；不同内容报告冲突。
+
+输出接受与保存先通过合成响应验证，现已通过下文普通CLI会话池完成真实模型配合合成评论的文件保存闭环。真实评论画像质量评估和网页展示仍待后续阶段。
+
+### Claude CLI 进程适配层（本地库）
+
+`app.analysis_execution.command.CliRequest` 描述一次调用；`build_command` 构造固定参数数组，正文通过 UTF-8 stdin 传递。`app.analysis_execution.runner.execute(request, records_root=..., environment=..., authorized=True)` 由可信服务调用，默认拒绝执行。调用方必须显式选择可执行文件、稳定工作目录、主会话 UUID、attempt UUID、模型、单次预算、超时和输出上限。Windows 使用用户指定的 `C:\Users\dengww\.local\bin\claude.exe`。
+
+普通传输默认 `--bare`；原生初始化/恢复使用下文的显式管理模式。认证环境由可信调用方提供，程序不保存令牌、不修改全局认证配置、不自动切换模型。兼容服务的 AUTH_TOKEN 已通过普通 bare 请求验证，不能仅凭 auth status 判断 print 请求必然失败。工具允许列表不是文件系统沙箱；正式服务仍需独立账户、目录权限及经过验证的成员配置。
+
+调用记录保存于调用方指定的私有、Git 忽略或仓库外目录：`<records_root>/<session_id>/<attempt_id>/request.json`、`stdout.jsonl`、`stderr.txt`、`outcome.json`。响应可能包含评论和模型内部消息，目录不能作为公共静态文件服务。请求只记录正文摘要，不保存正文或环境；响应及 stderr 原样保留在本地受控目录。调用前建立 request，完成后写 outcome；已有 attempt 一律不重发，包括崩溃后只有 request 的情况。一个会话使用同一 records_root，首次与恢复共用单写锁。
+
+`transport_succeeded` 只说明进程及主事件通过传输检查，`business_acceptance` 始终为 `not_evaluated`。本层不创建可信成员证据，不调用结果接受器；主/子身份、规则切换、任务调度及累计预算需继续接入。费用字段 `estimated_cost_usd` 是 CLI 估算；超时、无费用或多结果费用含义无法确认时为 null/unknown，不能当作零或服务商实际账单。该适配层已用于下文普通会话池的真实模型合成验证。
+
+Windows 终止采用 taskkill /T 加主进程兜底，尚不提供完整进程树隔离保证。清理未确认返回 `process_cleanup_unverified`；缺少 outcome 或清理未确认的调用会阻止同一会话的新 attempt（`session_recovery_required`）。需人工核对残留进程后恢复，本层不自动解除隔离。`trigger_reason` 保留 timeout/output_limit 等原始原因。正式部署前仍需操作系统级进程生命周期验收；本轮没有在 Linux 上实测。
+
+### 已登记成员的任务投递闭环
+
+`app.analysis_execution.dispatch.dispatch_task` 已连接固定任务包、原生 SendMessage 恢复证据、`accept_response` 和用户汇总后的 `save_profile`。这是可信后端内部的单任务接口；参数为分析根、run/manifest/task ID，以及 `CliRequest`、登记 agent_id、标签目录、执行配置、环境和显式授权。主会话必须复用登记 session，cwd 必须是对应视频分析目录。原生首次创建与受限修复见下文实验性接口，自动批量调度尚未接入；离线清单中的 uncreated 成员不能运行本接口。
+
+每次把评论 packet、冻结规则/背景、允许标签及完整输出 Schema 引用闭包投递给原成员。主与子输入均按实际 UTF-8 字节重新检查预算，不截断正文。采集准备必须为 ready；partial 来源必须在固定准备请求中显式 allow_partial=True，单独设置执行授权不能绕过覆盖策略。运行中标签目录、规则或执行配置变化会拒绝复用该运行。
+
+程序核对本次 SendMessage 收件人/完整正文、真实 resumedAgentId、task_started 与 task_notification 的关联，只从匹配的原生完成通知解析严格 JSON。多次主结果会继续读取；主 Agent 自述、旧摘要、错成员、截断、Markdown 包裹均不能当成业务响应。规则摘要确认仅证明接口上的本轮内容一致，不证明模型内部理解或画像质量。
+
+投递及证明保存在 `runs/<run_id>/deliveries/<task_id>/<attempt_id>/`：delivery.json、prompt.txt、stdout.jsonl、cli-request.json、cli-outcome.json、delivery-proof.json。验收回执同时绑定原生结果摘要和证明文件；重建接受目录及画像时会复核证据。CLI 已完成而验收中断时，同 attempt 可从匹配的私有记录继续验收，不重发模型；已经接受的任务复用前也会重新校验。不同 attempt 不被当作同一次调用。
+
+通过验收的 user_synthesis 自动触发画像保存，最终仍由完整依赖/覆盖检查决定输出 `users/<UID>.json` 或候选文件。`execution.json` 中 `reported_model_scope=main_session_only`、`member_models_verified=false` 明确表示当前只核验主会话报告的模型；子成员实际模型未独立归属验证，该限制同时写入画像。`label_catalog_sha256` 固定本轮标签目录。provider 是调用方配置的服务标识，不是从模型文本推断。
+
+本闭环通过合成原生事件和真实本地文件验证，尚未调用真实模型。普通 `runner.execute` 仍只提供传输结果；原生路径使用 dispatch_task，普通会话池使用 dispatch_pool_task；不应从上传的 JSON 自行构造 ExecutionContext。
+
+### 原生成员初始化与恢复（实验性接口）
+
+`initialize_team` 已提供按视频持久保存意图、逐个创建自定义只读成员、保存真实主/子ID与原生证明；`load_team` 重验完整团队，`bind_team` 发布新登记清单并保留旧清单。成员数量/角色由调用方显式指定。原生管理流程使用 `bare=False` 的明确配置模式：禁用隐式 settings 来源、hooks 和 MCP；自定义定义与创建权限分开，普通恢复可以加载原定义而不开放 Agent 创建工具。CLI 2.1.261 的本次实测 bare 模式未提供所需 Agent/SendMessage 工具，不能用于该原生管理流程。
+
+调用记录位于 `<video>/sessions/cli-calls/`；冻结初始化意图、成员证明和团队文件位于 `sessions/team/`；CLI历史位于 `sessions/claude-state/`。`recover_empty=True` 仅允许完整证据确认首次调用没有任何工具/创建活动时，归档旧计划并恢复同一主会话。一般中断或身份不明不得通过换 attempt 重建。
+
+`repair_member_handshake` 仅对原生证据确认已创建、旧任务已结束的原ID发送握手修复，禁止 Agent 创建。原始创建数据保持不变；新的恢复与原始出生记录共同证明握手。重复成功调用或完整响应后本地发布中断可复用原记录，不重发模型。错误/缺失记录、未知费用或CLI明确拒绝恢复都会阻塞。
+
+`initialization_status(video)` 是只读诊断接口，区分 `verified`、`created_unverified`、`resume_refused`、`not_started` 等状态。观察到ID不代表通过握手，更不能授权分析。只有完整团队通过重验才能进入登记绑定；诊断文件和主Agent复述的预期JSON均不能冒充子成员结果。
+
+`spend_limit` 是当前初始化计划的显式费用准入和记账额度，不是供应商硬账单上限。单次 `--max-budget-usd` 已观察到请求完成后的超额；出现超额或预算停止后，后续调用还需至少两倍已观察最大单次费用的余量，并覆盖剩余预留。费用未知会停止。独立旧计划和前置检查的费用仍需调用方计入总预算，不能因恢复换计划清零。预算停止时，只有完整原生握手证据才能保留已验证身份；分析结果接受规则不因此放宽。
+
+**真实整组验收尚未通过。** 当前CLI可拒绝自动恢复已取消的原生子成员，单靠保存ID无法保证其恢复。不得伪造完成状态、编辑厂商停止标记或静默替换成员。用户已确认 [独立普通会话池策略](docs/plans/2026-09-08-agent-resume-strategy-proposal.md)，实现见下文。原生显式替换及长期历史备份尚未实现；旧原生记录继续保留。
+
+### 独立普通 CLI 会话池
+
+当前默认开发方向改为应用层会话池。`prepare_session_pool` 从 ready 的冻结输入登记一个协调主会话和调用方指定的工作成员，每个成员保存普通 session UUID；离线登记不表示 CLI 已启动。`bind_session_pool` 发布新的任务成员映射。`run_pool_turn` 首次使用 `--session-id`，后续对原 UUID 使用 `--resume`；只开放 Read，不使用原生 Agent/SendMessage。
+
+服务端接入接口位于 `app.analysis_execution.pool_binding`、`session_pool` 和 `pool_dispatch`：
+
+```python
+pool = prepare_session_pool(
+    root, run_id, manifest_id, rule_catalog=rule_catalog,
+    model=configured_model, provider=provider_name,
+    members=[
+        {"member_id": "initial-reader", "role": "user_initial"},
+        {"member_id": "context-reader", "role": "thread_context"},
+        {"member_id": "synthesis-reader", "role": "user_synthesis"},
+    ],
+)
+bound = bind_session_pool(root, run_id, manifest_id, rule_catalog)
+# 从新 manifest 的 registry 选择当前任务对应的 worker UUID，放入 CliRequest.session_id。
+# dispatch_pool_task(..., request=request, agent_id=worker_uuid,
+#                    rule_catalog=rule_catalog, execution_config=execution_config,
+#                    environment=explicit_environment, spend_limit=Decimal("5"), authorized=True)
+```
+
+每个任务直接输入完整冻结 AgentDelivery（当前评论、上下文、先前观察、角色/规则/背景、输出 schema），结果通过普通会话独立证明与原 AnalysisOutput 校验后接受。最终综合任务仍保存到 `runs/<analysis_run_id>/users/<uid>.json`。协调主会话通过下文 `run_coordinator_turn` 统一加载背景；模型自动分配/汇总批量任务尚未接入，本阶段提供持久会话与单任务闭环接口。
+
+持久数据存于视频目录下的 `sessions/pool/pool.json`、`sessions/pool-state/`、`sessions/pool-calls/`，旧 `sessions/team/` 保留。新 manifest 的 `agent_id` 对会话池适配器表示普通 worker UUID，执行记录使用独立 adapter 标识。已存在原生 `execution.json` 的旧分析 run 必须新建分析 run 后绑定池，不能覆盖旧执行来源；准备输入可复用。后续新批次改变角色文件时，在本批 registry 和任务包内冻结新摘要，继续使用原 UUID，pool 内最初的角色摘要仅作初始化来源记录。
+
+每次新调用检查整个池的既有费用和显式 `spend_limit`；未知费用或未完成记录阻止继续。相同 attempt 只读取旧证据，不再次调用。CLI 预算是估算准入，不能保证兼容服务账单硬上限。会话文件需随应用数据备份；保存 UUID 不保证历史被删除后仍能恢复。当前采用 CLI 2.1.261 适配器。
+
+已使用用户本地 CLI 2.1.261 完成普通主会话创建/同 UUID 跨进程恢复，以及六个合成评论分析任务到最终 UID JSON 的真实闭环；重复执行最终任务复用已接受结果，不新增模型调用。该验证说明接口和文件链路可用，不代表真实评论上的画像质量已评估。
+
+### 主协调会话的视频背景输入
+
+业务协调入口使用 `app.analysis_execution.coordinator.run_coordinator_turn`：参数为 root、run_id、manifest_id，以及 request、rule_catalog、environment、expected_model、spend_limit、authorized。`request.session_id` 必须是已登记的主 UUID；`request.prompt` 只填写本次协调要求，入口自动从当前分析批次固定的上下文加载 README、角色、规则和协调说明，调用方不必手工拼接背景。
+
+`prepare_coordinator_delivery` 提供同一输入的只读预览。README 正文既在 `resources.background.text` 中，也包含在资源正文映射内，与工作任务使用同一快照和摘要；空白 README 显式标为 `background_status=missing`。更新原目录 README 不会改动旧分析，需重新准备输入并创建新分析 run，再绑定原会话池；主 UUID 保持不变。超过输入预算时拒绝调用，不截断视频介绍。
+
+主模型须返回严格 JSON `{context_sha256, response}`，摘要与完整本轮输入匹配后，才在 `runs/<run_id>/coordinator/<attempt_id>/` 保存 input.json、response.json、receipt.json。协调回执不等于分析任务已接受，也不能直接生成画像；自动分派仍待后续阶段。README 作为视频背景，不构成用户行为证据或更改分析规则的指令。
